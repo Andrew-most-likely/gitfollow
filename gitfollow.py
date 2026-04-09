@@ -11,7 +11,6 @@ Required env vars:
   GH_USERNAME     - Your GitHub username
 
 Optional env vars:
-  TARGET_ACCOUNTS - Comma-separated accounts whose followers we'll follow (default: github,torvalds)
   FOLLOW_LIMIT    - Max new follows per run (default: 400)
   UNFOLLOW_HOURS  - Hours before unfollowing non-followers (default: 24)
   WHITELIST       - Comma-separated usernames to never unfollow
@@ -31,7 +30,6 @@ from pathlib import Path
 
 TOKEN        = os.environ["GH_TOKEN"]
 USERNAME     = os.environ["GH_USERNAME"]
-TARGETS      = [t.strip() for t in os.environ.get("TARGET_ACCOUNTS", "github,torvalds").split(",") if t.strip()]
 FOLLOW_LIMIT = int(os.environ.get("FOLLOW_LIMIT", 400))
 UNFOLLOW_HRS = int(os.environ.get("UNFOLLOW_HOURS", 24))
 WHITELIST    = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
@@ -166,23 +164,32 @@ def do_unfollows(state: dict, my_followers: set):
 
 def candidate_pool(already_in_state: set, my_following: set) -> list:
     """
-    Collect candidate users to follow by sampling followers of TARGET_ACCOUNTS.
+    Pull users from GitHub's global user list starting at a random offset.
     Returns a shuffled list of logins not already tracked/followed.
     """
     skip = already_in_state | my_following | {USERNAME.lower()}
     candidates = []
 
-    for target in TARGETS:
-        log.info("Fetching followers of %s …", target)
-        items = paginate(
-            f"https://api.github.com/users/{target}/followers",
-            max_pages=5,   # 500 users per target — plenty
-        )
-        for u in items:
+    # GitHub's /users endpoint paginates by `since` (last seen user ID).
+    # Start at a random ID so we don't always hit the same accounts.
+    since = random.randint(0, 5_000_000)
+
+    log.info("Fetching global users since id=%d …", since)
+    # Each page returns up to 100 users; grab enough to fill the follow limit
+    pages_needed = (FOLLOW_LIMIT // 100) + 3
+    for _ in range(pages_needed):
+        resp = api_get("https://api.github.com/users", {"since": since, "per_page": 100})
+        if resp.status_code != 200:
+            break
+        batch = resp.json()
+        if not batch:
+            break
+        for u in batch:
             login = u["login"].lower()
             if login not in skip:
                 candidates.append(login)
                 skip.add(login)
+        since = batch[-1]["id"]
 
     random.shuffle(candidates)
     return candidates
