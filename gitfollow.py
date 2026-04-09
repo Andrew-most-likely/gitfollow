@@ -233,7 +233,7 @@ def do_follows(state: dict, my_following: set, my_followers: set):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
-    log.info("=== GitFollow starting | user=%s targets=%s ===", USERNAME, TARGETS)
+    log.info("=== GitFollow starting | user=%s ===", USERNAME)
 
     remaining = checks_remaining()
     log.info("API quota remaining: %d", remaining)
