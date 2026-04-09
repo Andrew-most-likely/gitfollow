@@ -73,14 +73,29 @@ def api_get(url: str, params: dict = None) -> requests.Response:
         return resp
 
 
+def api_write(method: str, url: str) -> int:
+    """PUT/DELETE with secondary rate-limit back-off."""
+    while True:
+        resp = requests.request(method, url, headers=HEADERS, timeout=30)
+        if resp.status_code == 429 or (
+            resp.status_code == 403 and (
+                "rate limit" in resp.text.lower() or
+                "secondary" in resp.text.lower()
+            )
+        ):
+            retry_after = int(resp.headers.get("Retry-After", 60))
+            log.warning("Secondary rate limit hit — sleeping %ds", retry_after)
+            time.sleep(retry_after)
+            continue
+        return resp.status_code
+
+
 def api_put(url: str) -> int:
-    resp = requests.put(url, headers=HEADERS, timeout=30)
-    return resp.status_code
+    return api_write("PUT", url)
 
 
 def api_delete(url: str) -> int:
-    resp = requests.delete(url, headers=HEADERS, timeout=30)
-    return resp.status_code
+    return api_write("DELETE", url)
 
 
 def paginate(url: str, params: dict = None, max_pages: int = 10) -> list:
@@ -225,8 +240,8 @@ def do_follows(state: dict, my_following: set, my_followers: set):
         else:
             log.warning("Follow failed for %s — HTTP %s", login, code)
 
-        # Polite delay — avoid hammering the API
-        time.sleep(random.uniform(0.8, 2.0))
+        # Polite delay — avoid secondary rate limits
+        time.sleep(random.uniform(2.0, 4.0))
 
     log.info("Followed %d new users this run", followed)
 
