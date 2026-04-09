@@ -235,6 +235,17 @@ def do_follows(state: dict, my_following: set, my_followers: set):
 def main():
     log.info("=== GitFollow starting | user=%s ===", USERNAME)
 
+    # Verify the token identity
+    resp = api_get("https://api.github.com/user")
+    if resp.status_code != 200:
+        log.error("Token is invalid or unauthenticated — HTTP %s", resp.status_code)
+        return
+    authed_as = resp.json().get("login", "unknown")
+    log.info("Token authenticated as: %s", authed_as)
+    if authed_as.lower() != USERNAME.lower():
+        log.error("Token user (%s) does not match GH_USERNAME (%s) — aborting", authed_as, USERNAME)
+        return
+
     remaining = checks_remaining()
     log.info("API quota remaining: %d", remaining)
     if remaining < 100:
