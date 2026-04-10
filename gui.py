@@ -716,6 +716,7 @@ class App(tk.Tk):
             env.pop("QUALITY_UNFOLLOW", None)
             os.environ.pop("QUALITY_UNFOLLOW", None)
             os.environ.pop("FOLLOW_LIMIT", None)
+        env["STATE_FILE"] = str(STATE_FILE)
         os.environ.update(env)
         self._running = True
         self._btn_follow.config_state(disabled=True)
