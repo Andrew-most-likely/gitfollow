@@ -1,0 +1,44 @@
+name: GitFollow Unfollow
+
+on:
+  schedule:
+    # Runs once per week on Sunday at 10:00 UTC — adjust to your liking
+    - cron: "0 10 * * 0"
+  workflow_dispatch:        # Also lets you trigger manually from the Actions tab
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run quality unfollow
+        env:
+          GH_TOKEN:          ${{ secrets.GH_TOKEN }}
+          GH_USERNAME:       ${{ secrets.GH_USERNAME }}
+          WHITELIST:         ${{ secrets.WHITELIST }}       # optional
+          ACTIVITY_DAYS:     ${{ vars.ACTIVITY_DAYS || '30' }}
+          FOLLOW_LIMIT:      "0"                            # skip the follow pass
+          UNFOLLOW_HOURS:    ${{ vars.UNFOLLOW_HOURS || '24' }}
+          QUALITY_UNFOLLOW:  "true"
+        run: python gitfollow.py
+
+      - name: Commit state
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/state.json
+          git diff --cached --quiet || git commit -m "chore: update follow state [skip ci]"
+          git push
