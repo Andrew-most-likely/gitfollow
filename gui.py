@@ -120,8 +120,8 @@ class RoundedButton(tk.Canvas):
         self._fg        = fg
         self._radius    = radius
         self._font      = font
-        self._w         = width
-        self._h         = height
+        self._btn_w     = width
+        self._btn_h     = height
         self._disabled  = False
         self._hovering  = False
         self._draw()
@@ -131,7 +131,7 @@ class RoundedButton(tk.Canvas):
 
     def _rounded_rect(self, color: str):
         self.delete("all")
-        w, h, r = self._w, self._h, self._radius
+        w, h, r = self._btn_w, self._btn_h, self._radius
         c = color
         self.create_arc(0,       0,       2*r, 2*r, start=90,  extent=90, fill=c, outline=c)
         self.create_arc(w-2*r,   0,       w,   2*r, start=0,   extent=90, fill=c, outline=c)
