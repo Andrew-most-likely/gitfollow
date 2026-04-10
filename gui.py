@@ -5,31 +5,25 @@ Run: python gui.py   or double-click GitFollow.exe
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
+import importlib
 import json
+import logging
 import os
 import sys
-import shutil
-import subprocess
 import threading
 import webbrowser
 from pathlib import Path
 from datetime import datetime
 
-# ── Path resolution (works both as .py script and PyInstaller .exe) ───────────
+# ── Path resolution (works as .py script and PyInstaller .exe) ────────────────
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).parent
-    # Extract bundled gitfollow.py next to the exe on first run
-    _src = Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "gitfollow.py"
-    _dst = BASE_DIR / "gitfollow.py"
-    if _src.exists() and not _dst.exists():
-        shutil.copy(_src, _dst)
 else:
     BASE_DIR = Path(__file__).parent
 
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
-SCRIPT     = BASE_DIR / "gitfollow.py"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +57,19 @@ def load_state() -> dict:
         "stats": {"followed": 0, "unfollowed": 0, "mutual": 0},
     }
 
+
+class _GUILogHandler(logging.Handler):
+    """Redirects log records to a GUI callback."""
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+
+    def emit(self, record):
+        try:
+            self.callback(self.format(record) + "\n")
+        except Exception:
+            pass
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
@@ -71,7 +78,7 @@ class App(tk.Tk):
         self.title("GitFollow")
         self.geometry("720x540")
         self.resizable(False, False)
-        self._proc = None
+        self._running = False
         self._build_ui()
         self.after(100, self._on_open)
 
@@ -107,7 +114,6 @@ class App(tk.Tk):
 
         checks = [
             ("python",   "Python 3.8+"),
-            ("script",   "gitfollow.py found"),
             ("requests", "requests library installed"),
             ("token",    "GH_TOKEN configured"),
             ("username", "GH_USERNAME configured"),
@@ -125,7 +131,7 @@ class App(tk.Tk):
         btn_row = ttk.Frame(f)
         btn_row.pack(fill="x", pady=(14, 0))
         ttk.Button(btn_row, text="Re-check", command=self._run_checks).pack(side="left", padx=(0, 8))
-        ttk.Button(btn_row, text="Auto-fix", command=self._autofix).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text="Auto-fix",  command=self._autofix).pack(side="left", padx=(0, 8))
         ttk.Button(
             btn_row, text="Create GitHub Token →",
             command=lambda: webbrowser.open(
@@ -141,7 +147,6 @@ class App(tk.Tk):
     def _run_checks(self):
         results = {}
         results["python"] = sys.version_info >= (3, 8)
-        results["script"] = SCRIPT.exists()
 
         try:
             import requests  # noqa
@@ -165,6 +170,7 @@ class App(tk.Tk):
         )
 
     def _autofix(self):
+        import subprocess
         fixed = []
 
         try:
@@ -210,8 +216,8 @@ class App(tk.Tk):
             ("following",  "Currently Following"),
             ("mutual",     "Mutual Follows"),
             ("unfollowed", "Total Unfollowed"),
-            ("cached",     "Cached Checks"),
             ("followed",   "Total Followed"),
+            ("cached",     "Cached Checks"),
         ]
         self._stat_vars = {}
         for i, (key, label) in enumerate(cards):
@@ -234,16 +240,16 @@ class App(tk.Tk):
         self._dash_ts.pack(side="left", padx=12)
 
     def _refresh_dashboard(self):
-        state = load_state()
-        stats     = state.get("stats", {})
+        state  = load_state()
+        stats  = state.get("stats", {})
         following = state.get("following", {})
-        cache     = state.get("quality_cache", {})
+        cache  = state.get("quality_cache", {})
 
         self._stat_vars["following"].set(f"{len(following):,}")
         self._stat_vars["mutual"].set(f"{stats.get('mutual', 0):,}")
         self._stat_vars["unfollowed"].set(f"{stats.get('unfollowed', 0):,}")
-        self._stat_vars["cached"].set(f"{len(cache):,}")
         self._stat_vars["followed"].set(f"{stats.get('followed', 0):,}")
+        self._stat_vars["cached"].set(f"{len(cache):,}")
         self._dash_ts.config(text=f"Updated {datetime.now().strftime('%H:%M:%S')}")
 
     # ── Run tab ───────────────────────────────────────────────────────────────
@@ -267,10 +273,6 @@ class App(tk.Tk):
             command=lambda: self._start_run("unfollow"),
         )
         self._btn_unfollow.pack(side="left", padx=(0, 8))
-        self._btn_stop = ttk.Button(
-            btn_row, text="■  Stop", command=self._stop_run, state="disabled"
-        )
-        self._btn_stop.pack(side="left", padx=(0, 8))
         ttk.Button(btn_row, text="Clear", command=self._clear_log).pack(side="right")
 
         self._log = scrolledtext.ScrolledText(
@@ -280,8 +282,8 @@ class App(tk.Tk):
         self._log.pack(fill="both", expand=True)
 
     def _start_run(self, mode: str):
-        if not SCRIPT.exists():
-            messagebox.showerror("Error", "gitfollow.py not found.\nCheck the Setup tab.")
+        if self._running:
+            messagebox.showinfo("Already running", "A run is already in progress.")
             return
 
         env = {**os.environ}
@@ -297,46 +299,42 @@ class App(tk.Tk):
 
         if mode == "unfollow":
             env["QUALITY_UNFOLLOW"] = "true"
-            env["FOLLOW_LIMIT"] = "0"
+            env["FOLLOW_LIMIT"]     = "0"
 
+        # Apply to os.environ so gitfollow reads them on import/reload
+        os.environ.update(env)
+
+        self._running = True
         self._btn_follow.config(state="disabled")
         self._btn_unfollow.config(state="disabled")
-        self._btn_stop.config(state="normal")
         self._log_write(f"\n{'─' * 60}\n▶  Starting {mode} run…\n{'─' * 60}\n")
 
+        handler = _GUILogHandler(self._log_write)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+
         def _worker():
+            root_log = logging.getLogger()
+            root_log.setLevel(logging.INFO)
+            root_log.addHandler(handler)
             try:
-                self._proc = subprocess.Popen(
-                    [sys.executable, str(SCRIPT)],
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-                for line in self._proc.stdout:
-                    self._log_write(line)
-                self._proc.wait()
-                self._log_write(
-                    f"\n{'─' * 60}\n■  Finished (exit {self._proc.returncode})\n{'─' * 60}\n"
-                )
+                # Lazy import so credentials are set before the module loads.
+                # Reload on every run so config re-reads the current os.environ.
+                import gitfollow as _gf
+                importlib.reload(_gf)
+                _gf.main()
             except Exception as e:
                 self._log_write(f"\nERROR: {e}\n")
             finally:
-                self._proc = None
+                root_log.removeHandler(handler)
                 self.after(0, self._run_done)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _stop_run(self):
-        if self._proc:
-            self._proc.terminate()
-            self._log_write("\n⚠  Stopped by user.\n")
-
     def _run_done(self):
+        self._running = False
         self._btn_follow.config(state="normal")
         self._btn_unfollow.config(state="normal")
-        self._btn_stop.config(state="disabled")
+        self._log_write(f"\n{'─' * 60}\n■  Run complete\n{'─' * 60}\n")
         self._refresh_dashboard()
 
     def _log_write(self, text: str):
@@ -395,7 +393,7 @@ class App(tk.Tk):
 
         btn_row = ttk.Frame(f)
         btn_row.pack(fill="x", pady=(16, 0))
-        ttk.Button(btn_row, text="Save Settings", command=self._save_settings).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text="Save Settings",  command=self._save_settings).pack(side="left", padx=(0, 8))
         ttk.Button(btn_row, text="Load from .env", command=self._load_settings).pack(side="left")
 
         self._settings_msg = ttk.Label(f, text="", foreground="gray", font=("Segoe UI", 9))
@@ -406,7 +404,7 @@ class App(tk.Tk):
         env["QUALITY_UNFOLLOW"] = "true" if self._qu_var.get() else "false"
         save_env(env)
         self._settings_msg.config(
-            text=f"Saved to {ENV_FILE}  ({datetime.now().strftime('%H:%M:%S')})",
+            text=f"Saved  ({datetime.now().strftime('%H:%M:%S')})",
             foreground="#28a745",
         )
         self._run_checks()
