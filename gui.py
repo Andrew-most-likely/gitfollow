@@ -100,14 +100,11 @@ def _darken(hex_color: str, amount: float) -> str:
 # Renders a white card with a soft bottom-right drop shadow by showing a
 # slightly larger, darker frame behind the card frame.
 
-def shadow_card(parent, padx=0, pady=0, **pack_kw) -> tk.Frame:
+def shadow_card(parent, **pack_kw) -> tk.Frame:
     wrap = tk.Frame(parent, bg=C_SHADOW)
     wrap.pack(**pack_kw)
     card = tk.Frame(wrap, bg=C_SURFACE)
-    card.pack(fill="both", expand=True,
-              padx=(0, 3), pady=(0, 4))
-    if padx or pady:
-        card.configure(padx=padx, pady=pady)
+    card.pack(fill="both", expand=True, padx=(0, 3), pady=(0, 4))
     return card
 
 
@@ -407,7 +404,7 @@ class App(tk.Tk):
         tk.Label(page, text="Verify your environment before running.",
                  font=F_SM, bg=C_BG, fg=C_MUTED).pack(anchor="w", padx=28, pady=(0, 20))
 
-        card = shadow_card(page, fill="x", padx=28, pady=(0, 0))
+        card = shadow_card(page, fill="x", padx=28)
 
         checks = [
             ("python",   "Python 3.8+",
