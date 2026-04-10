@@ -10,12 +10,17 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write       # Needed to commit state.json back to the repo
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: data/state.json
+          key: gitfollow-state-${{ github.run_id }}
+          restore-keys: gitfollow-state-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,11 +44,3 @@ jobs:
           MIN_ACCOUNT_AGE_DAYS: ${{ vars.MIN_ACCOUNT_AGE_DAYS || '30' }}
           CACHE_DAYS:           ${{ vars.CACHE_DAYS || '7' }}
         run: python gitfollow.py
-
-      - name: Commit state
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/state.json
-          git diff --cached --quiet || git commit -m "chore: update follow state [skip ci]"
-          git push
