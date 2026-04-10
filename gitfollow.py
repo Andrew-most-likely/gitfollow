@@ -25,7 +25,7 @@ Required env vars:
   GH_USERNAME     - Your GitHub username
 
 Optional env vars:
-  FOLLOW_LIMIT      - Max new follows per run (default: 400)
+  FOLLOW_LIMIT      - Max new follows per run (default: 150)
   UNFOLLOW_HOURS    - Hours before unfollowing non-followers (default: 24)
   WHITELIST         - Comma-separated usernames to never unfollow
   STATE_FILE        - Path to state JSON file (default: data/state.json)
@@ -74,7 +74,6 @@ HEADERS = {
     "User-Agent": "GitFollow/2.0 (+https://github.com/Andrew-most-likely/gitfollow)",
 }
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 # Set by the GUI to request a graceful stop between operations.
@@ -330,11 +329,11 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
         })
         if resp.status_code != 200:
             log.warning("Repo search failed for topic %s (%s)", topic, resp.status_code)
-            time.sleep(2)
+            time.sleep(1)
             continue
 
         repos = resp.json().get("items", [])
-        time.sleep(2)
+        time.sleep(1)
 
         for repo in repos:
             if stop_event.is_set():
@@ -351,7 +350,7 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
                 "page": page,
             })
             if resp2.status_code != 200:
-                time.sleep(2)
+                time.sleep(1)
                 continue
             for u in resp2.json():
                 login = u["login"].lower()
@@ -359,7 +358,7 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
                     candidates.append(login)
                     skip.add(login)
             log.info("  Got %d candidates so far", len(candidates))
-            time.sleep(2)
+            time.sleep(1)
 
     # ── Source 2: user search fallback (no join-date sort — attracts new bots) ─
     if len(candidates) < target:
@@ -396,6 +395,27 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
             log.info("Search page %d: %d total candidates", page, len(candidates))
             time.sleep(2)
 
+    # ── Last resort: global /users list ───────────────────────────────────────
+    if not candidates:
+        since = random.randint(0, 5_000_000)
+        log.info("Last-resort fallback to global /users since id=%d ...", since)
+        for _ in range(5):
+            if stop_event.is_set():
+                break
+            resp = api_get("https://api.github.com/users", {"since": since, "per_page": 100})
+            if resp.status_code != 200:
+                break
+            batch = resp.json()
+            if not batch:
+                break
+            for u in batch:
+                login = u["login"].lower()
+                if login not in skip:
+                    candidates.append(login)
+                    skip.add(login)
+            since = batch[-1]["id"]
+            time.sleep(1)
+
     random.shuffle(candidates)
     log.info("Candidate pool ready: %d accounts", len(candidates))
     return candidates
@@ -411,7 +431,8 @@ def do_follows(state: dict, my_following: set, my_followers: set):
     checked   = 0
     now_iso   = datetime.now(timezone.utc).isoformat()
     pool_size = len(pool)
-    log.info("Checking quality of %d candidates ...", pool_size)
+    quota     = checks_remaining()
+    log.info("Checking quality of %d candidates (quota=%d) ...", pool_size, quota)
 
     for login in pool:
         if stop_event.is_set():
@@ -419,14 +440,14 @@ def do_follows(state: dict, my_following: set, my_followers: set):
             break
         if followed >= FOLLOW_LIMIT:
             break
-        if checks_remaining() < 50:
+        if checked % 50 == 0 and checked > 0:
+            quota = checks_remaining()
+        if quota < 50:
             log.warning("API quota nearly exhausted - stopping follows early")
             break
 
         # Skip if they already follow us (no point in the follow-back game)
         if login in my_followers:
-            state["following"][login] = {"followed_at": now_iso, "mutual": True}
-            state["stats"]["mutual"] += 1
             continue
 
         # Quality gate (cached)
@@ -507,6 +528,11 @@ def do_quality_unfollows(state: dict, my_following: set):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    # Configure root logger once — guard prevents duplicate handlers on module reload
+    if not logging.root.handlers:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log.setLevel(logging.INFO)
+
     log.info("=== GitFollow starting | user=%s ===", USERNAME)
 
     # Verify the token identity
@@ -527,6 +553,17 @@ def main():
         return
 
     state        = load_state()
+
+    # Prune stale quality-cache entries so state.json doesn't grow forever
+    cache = state.setdefault("quality_cache", {})
+    cache_cutoff = datetime.now(timezone.utc) - timedelta(days=CACHE_DAYS)
+    stale = [k for k, v in cache.items()
+             if datetime.fromisoformat(v["checked_at"]) < cache_cutoff]
+    if stale:
+        for k in stale:
+            del cache[k]
+        log.info("Pruned %d stale cache entries", len(stale))
+
     my_following = get_my_following()
     my_followers = get_my_followers()
 

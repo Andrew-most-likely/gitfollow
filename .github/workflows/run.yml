@@ -27,11 +27,17 @@ jobs:
 
       - name: Run GitFollow
         env:
-          GH_TOKEN:       ${{ secrets.GH_TOKEN }}
-          GH_USERNAME:    ${{ secrets.GH_USERNAME }}
-          FOLLOW_LIMIT:   ${{ vars.FOLLOW_LIMIT || '400' }}
-          UNFOLLOW_HOURS: ${{ vars.UNFOLLOW_HOURS || '24' }}
-          WHITELIST:      ${{ secrets.WHITELIST }}           # optional
+          GH_TOKEN:             ${{ secrets.GH_TOKEN }}
+          GH_USERNAME:          ${{ secrets.GH_USERNAME }}
+          FOLLOW_LIMIT:         ${{ vars.FOLLOW_LIMIT || '150' }}
+          UNFOLLOW_HOURS:       ${{ vars.UNFOLLOW_HOURS || '24' }}
+          WHITELIST:            ${{ secrets.WHITELIST }}
+          ACTIVITY_DAYS:        ${{ vars.ACTIVITY_DAYS || '30' }}
+          MIN_FOLLOWERS:        ${{ vars.MIN_FOLLOWERS || '1' }}
+          MAX_REPOS:            ${{ vars.MAX_REPOS || '500' }}
+          MAX_FF_RATIO:         ${{ vars.MAX_FF_RATIO || '10.0' }}
+          MIN_ACCOUNT_AGE_DAYS: ${{ vars.MIN_ACCOUNT_AGE_DAYS || '30' }}
+          CACHE_DAYS:           ${{ vars.CACHE_DAYS || '7' }}
         run: python gitfollow.py
 
       - name: Commit state

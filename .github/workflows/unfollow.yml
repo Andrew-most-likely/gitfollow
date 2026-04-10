@@ -26,13 +26,18 @@ jobs:
 
       - name: Run quality unfollow
         env:
-          GH_TOKEN:          ${{ secrets.GH_TOKEN }}
-          GH_USERNAME:       ${{ secrets.GH_USERNAME }}
-          WHITELIST:         ${{ secrets.WHITELIST }}       # optional
-          ACTIVITY_DAYS:     ${{ vars.ACTIVITY_DAYS || '30' }}
-          FOLLOW_LIMIT:      "0"                            # skip the follow pass
-          UNFOLLOW_HOURS:    ${{ vars.UNFOLLOW_HOURS || '24' }}
-          QUALITY_UNFOLLOW:  "true"
+          GH_TOKEN:             ${{ secrets.GH_TOKEN }}
+          GH_USERNAME:          ${{ secrets.GH_USERNAME }}
+          WHITELIST:            ${{ secrets.WHITELIST }}
+          FOLLOW_LIMIT:         "0"
+          UNFOLLOW_HOURS:       ${{ vars.UNFOLLOW_HOURS || '24' }}
+          QUALITY_UNFOLLOW:     "true"
+          ACTIVITY_DAYS:        ${{ vars.ACTIVITY_DAYS || '30' }}
+          MIN_FOLLOWERS:        ${{ vars.MIN_FOLLOWERS || '1' }}
+          MAX_REPOS:            ${{ vars.MAX_REPOS || '500' }}
+          MAX_FF_RATIO:         ${{ vars.MAX_FF_RATIO || '10.0' }}
+          MIN_ACCOUNT_AGE_DAYS: ${{ vars.MIN_ACCOUNT_AGE_DAYS || '30' }}
+          CACHE_DAYS:           ${{ vars.CACHE_DAYS || '7' }}
         run: python gitfollow.py
 
       - name: Commit state

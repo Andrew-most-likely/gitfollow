@@ -27,25 +27,25 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "2.0"
+VERSION = "2.0.4"
 
-# ── Apple-inspired design tokens ──────────────────────────────────────────────
+# ── GitHub Dark Dimmed color tokens ───────────────────────────────────────────
 
-C_BG        = "#F2F2F7"   # systemGroupedBackground
-C_SURFACE   = "#FFFFFF"   # systemBackground
-C_SIDEBAR   = "#1C1C1E"   # sidebar (dark)
-C_SIDEBAR_H = "#3A3A3C"   # sidebar hover
-C_SIDEBAR_S = "#2C2C2E"   # sidebar selected
-C_ACCENT    = "#007AFF"   # systemBlue
-C_SUCCESS   = "#34C759"   # systemGreen
-C_DANGER    = "#FF3B30"   # systemRed
-C_WARNING   = "#FF9500"   # systemOrange
-C_TEXT      = "#1C1C1E"   # primary label
-C_TEXT2     = "#48484A"   # secondary label
-C_MUTED     = "#8E8E93"   # tertiary label / placeholders
-C_SEP       = "#E5E5EA"   # separator
-C_TERM_BG   = "#000000"   # terminal background
-C_TERM_FG   = "#F2F2F7"   # terminal foreground
+C_BG        = "#22272e"   # canvas-default
+C_SURFACE   = "#2d333b"   # canvas-subtle
+C_SIDEBAR   = "#1c2128"   # canvas-inset (sidebar)
+C_SIDEBAR_H = "#2d333b"   # sidebar hover
+C_SIDEBAR_S = "#2d333b"   # sidebar selected
+C_ACCENT    = "#539bf5"   # accent-fg
+C_SUCCESS   = "#57ab5a"   # success-fg
+C_DANGER    = "#e5534b"   # danger-fg
+C_WARNING   = "#c69026"   # attention-fg
+C_TEXT      = "#adbac7"   # fg-default
+C_TEXT2     = "#768390"   # fg-muted
+C_MUTED     = "#636e7b"   # fg-subtle
+C_SEP       = "#444c56"   # border-default
+C_TERM_BG   = "#1c2128"   # canvas-inset (terminal)
+C_TERM_FG   = "#adbac7"   # fg-default
 
 F_APP   = ("Segoe UI", 12, "bold")
 F_H1    = ("Segoe UI", 17, "bold")
@@ -198,7 +198,7 @@ class Tooltip:
         tw.wm_geometry(f"+{x}+{y}")
         tk.Label(
             tw, text=self._text, justify="left", wraplength=260,
-            bg="#1C1C1E", fg="white", font=F_SM, padx=12, pady=8,
+            bg=C_SURFACE, fg=C_TEXT, font=F_SM, padx=12, pady=8,
         ).pack()
 
     def _hide(self, event=None):
@@ -288,9 +288,9 @@ class App(tk.Tk):
         tk.Label(brand, text=f"v{VERSION}", bg=C_SIDEBAR, fg=C_MUTED,
                  font=F_XS).pack(side="left", pady=22)
 
-        tk.Frame(self._sidebar, bg="#3A3A3C", height=1).pack(fill="x")
+        tk.Frame(self._sidebar, bg=C_SEP, height=1).pack(fill="x")
 
-        tk.Label(self._sidebar, text="MENU", bg=C_SIDEBAR, fg="#636366",
+        tk.Label(self._sidebar, text="MENU", bg=C_SIDEBAR, fg=C_MUTED,
                  font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(12, 2))
 
         for key, icon, label in [
@@ -304,7 +304,7 @@ class App(tk.Tk):
         # Spacer + license note
         tk.Frame(self._sidebar, bg=C_SIDEBAR).pack(fill="both", expand=True)
         tk.Label(self._sidebar, text="MIT License",
-                 bg=C_SIDEBAR, fg="#636366", font=F_XS).pack(side="bottom", pady=14)
+                 bg=C_SIDEBAR, fg=C_MUTED, font=F_XS).pack(side="bottom", pady=14)
 
     def _nav_item(self, key: str, label: str):
         frame = tk.Frame(self._sidebar, bg=C_SIDEBAR, cursor="hand2")
@@ -349,7 +349,7 @@ class App(tk.Tk):
         for key, (frame, inner, bar) in self._nav_frames.items():
             if key == name:
                 frame.config(bg=C_SIDEBAR_S)
-                inner.config(bg=C_SIDEBAR_S, fg="white",
+                inner.config(bg=C_SIDEBAR_S, fg=C_TEXT,
                              font=("Segoe UI", 10, "bold"))
                 bar.config(bg=C_ACCENT)
             else:
@@ -468,15 +468,21 @@ class App(tk.Tk):
     def _autofix(self):
         import subprocess as sp
         fixed = []
-        try:
-            import requests  # noqa
-        except ImportError:
+        # In a frozen exe, requests is already bundled — pip cannot help here
+        if not getattr(sys, "frozen", False):
             try:
-                sp.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
-                fixed.append("Installed requests")
-            except Exception as e:
-                messagebox.showerror("Auto-fix failed", str(e))
-                return
+                import requests  # noqa
+            except ImportError:
+                try:
+                    no_win = getattr(sp, "CREATE_NO_WINDOW", 0)
+                    sp.check_call(
+                        [sys.executable, "-m", "pip", "install", "requests", "-q"],
+                        creationflags=no_win,
+                    )
+                    fixed.append("Installed requests")
+                except Exception as e:
+                    messagebox.showerror("Auto-fix failed", str(e))
+                    return
         data_dir = BASE_DIR / "data"
         if not data_dir.exists():
             data_dir.mkdir(parents=True)
@@ -501,7 +507,9 @@ class App(tk.Tk):
                                  bg=C_SURFACE, fg=C_MUTED)
         self._dash_ts.pack(side="right", padx=(0, 12), anchor="center")
         RoundedButton(hdr_right, "Refresh", self._refresh_dashboard,
-                      width=90, height=30, font=F_SM).pack(side="right")
+                      width=90, height=30, font=F_SM).pack(side="right", padx=(0, 8))
+        RoundedButton(hdr_right, "Clear Cache", self._clear_cache,
+                      width=100, height=30, font=F_SM, bg=C_WARNING).pack(side="right")
 
         content = tk.Frame(page, bg=C_BG)
         content.pack(fill="both", expand=True, padx=20, pady=20)
@@ -607,6 +615,24 @@ class App(tk.Tk):
 
         threading.Thread(target=_fetch, daemon=True).start()
 
+    def _clear_cache(self):
+        state = load_state()
+        count = len(state.get("quality_cache", {}))
+        if count == 0:
+            messagebox.showinfo("Clear Cache", "Cache is already empty.")
+            return
+        if not messagebox.askyesno(
+            "Clear Cache",
+            f"Remove {count:,} cached quality-check results?\n"
+            "All accounts will be re-evaluated on the next run.",
+        ):
+            return
+        state["quality_cache"] = {}
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        self._stat_vars["cached"].set("0")
+        self._set_status(f"Cleared {count:,} cached entries.")
+
     # ── Run page ───────────────────────────────────────────────────────────────
 
     def _build_run_page(self):
@@ -653,19 +679,16 @@ class App(tk.Tk):
         clear_lbl.bind("<Button-1>", lambda _e: self._clear_log())
 
         # Terminal card
-        term = tk.Frame(content, bg=C_TERM_BG)
+        term = tk.Frame(content, bg=C_TERM_BG,
+                        highlightthickness=1, highlightbackground=C_SEP)
         term.pack(fill="both", expand=True)
 
-        # macOS-style terminal chrome
-        chrome = tk.Frame(term, bg="#1A1A1A")
+        # Minimal header bar — no dots
+        chrome = tk.Frame(term, bg=C_SURFACE)
         chrome.pack(fill="x")
-        dot_row = tk.Frame(chrome, bg="#1A1A1A")
-        dot_row.pack(side="left", padx=14, pady=9)
-        for dot_color in ("#FF5F56", "#FFBD2E", "#27C93F"):
-            tk.Label(dot_row, text="●", fg=dot_color, bg="#1A1A1A",
-                     font=("Segoe UI", 9)).pack(side="left", padx=2)
-        tk.Label(chrome, text="Output", font=("Segoe UI", 9),
-                 bg="#1A1A1A", fg="#636366").pack(pady=9)
+        tk.Label(chrome, text="Output", font=F_MONO,
+                 bg=C_SURFACE, fg=C_MUTED).pack(side="left", padx=14, pady=6)
+        tk.Frame(term, bg=C_SEP, height=1).pack(fill="x")
 
         self._log = scrolledtext.ScrolledText(
             term, font=F_MONO, state="disabled",
@@ -881,6 +904,8 @@ class App(tk.Tk):
         self._qu_var = tk.BooleanVar()
         tk.Checkbutton(form, variable=self._qu_var,
                        bg=C_SURFACE, activebackground=C_SURFACE,
+                       fg=C_TEXT, activeforeground=C_TEXT,
+                       selectcolor=C_BG,
                        relief="flat").grid(row=row_idx, column=1, pady=4, sticky="w")
         form.columnconfigure(1, weight=1)
 
@@ -899,7 +924,28 @@ class App(tk.Tk):
         self._settings_msg.pack(anchor="w", padx=24, pady=(0, 12))
 
     def _save_settings(self):
+        _INT_FIELDS   = {"FOLLOW_LIMIT", "UNFOLLOW_HOURS", "ACTIVITY_DAYS",
+                         "MIN_FOLLOWERS", "MAX_REPOS", "MIN_ACCOUNT_AGE_DAYS", "CACHE_DAYS"}
+        _FLOAT_FIELDS = {"MAX_FF_RATIO"}
         env = {k: v.get() for k, v in self._settings_vars.items()}
+        for k in _INT_FIELDS:
+            val = env.get(k, "").strip()
+            if val:
+                try:
+                    int(val)
+                except ValueError:
+                    self._settings_msg.config(
+                        text=f"{k} must be a whole number (got '{val}')", fg=C_DANGER)
+                    return
+        for k in _FLOAT_FIELDS:
+            val = env.get(k, "").strip()
+            if val:
+                try:
+                    float(val)
+                except ValueError:
+                    self._settings_msg.config(
+                        text=f"{k} must be a number (got '{val}')", fg=C_DANGER)
+                    return
         env["QUALITY_UNFOLLOW"] = "true" if self._qu_var.get() else "false"
         save_env(env)
         self._settings_msg.config(text=f"Saved to {ENV_FILE}", fg=C_SUCCESS)
