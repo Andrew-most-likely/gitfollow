@@ -5,6 +5,7 @@ Run: python gui.py   or double-click GitFollow.exe
 
 import colorsys
 import queue
+import time
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
 import importlib
@@ -15,7 +16,7 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -215,6 +216,30 @@ def _tip(parent, text: str, bg=C_BG) -> tk.Label:
     return lbl
 
 
+def _relative_time(iso_str: str) -> str:
+    """Return a human-readable relative time string from an ISO timestamp."""
+    if not iso_str:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = datetime.now(timezone.utc) - dt
+        total_seconds = int(diff.total_seconds())
+        if total_seconds < 60:
+            return "just now"
+        if total_seconds < 3600:
+            return f"{total_seconds // 60}m ago"
+        if total_seconds < 86400:
+            return f"{total_seconds // 3600}h ago"
+        days = diff.days
+        if days < 30:
+            return f"{days}d ago"
+        if days < 365:
+            return f"{days // 30}mo ago"
+        return f"{days // 365}y ago"
+    except Exception:
+        return "unknown"
+
+
 # ── Log handler ────────────────────────────────────────────────────────────────
 
 class _GUILogHandler(logging.Handler):
@@ -263,6 +288,7 @@ class App(tk.Tk):
         self._build_setup_page()
         self._build_dashboard_page()
         self._build_run_page()
+        self._build_people_page()
         self._build_settings_page()
 
         # Status bar (pinned to bottom of pane)
@@ -297,6 +323,7 @@ class App(tk.Tk):
             ("setup",     "checkmark.circle", "Setup"),
             ("dashboard", "chart.bar",        "Dashboard"),
             ("run",       "play.circle",      "Run"),
+            ("people",    "person.2",         "People"),
             ("settings",  "gearshape",        "Settings"),
         ]:
             self._nav_item(key, label)
@@ -795,6 +822,366 @@ class App(tk.Tk):
         self._log.config(state="normal")
         self._log.delete("1.0", tk.END)
         self._log.config(state="disabled")
+
+    # ── People page ────────────────────────────────────────────────────────────
+
+    def _build_people_page(self):
+        page = tk.Frame(self._pane, bg=C_BG)
+        self._pages["people"] = page
+
+        hdr_right = self._page_header(page, "People", "Browse following and followers.")
+        self._people_refresh_btn = RoundedButton(
+            hdr_right, "Refresh", self._load_people,
+            width=90, height=30, font=F_SM,
+        )
+        self._people_refresh_btn.pack(side="right")
+
+        # Sub-tab bar
+        self._people_tab_var = "following"
+        self._people_tab_btns = {}
+        tab_bar = tk.Frame(page, bg=C_SURFACE)
+        tab_bar.pack(fill="x")
+        for key, label in [("following", "Following"), ("followers", "Followers")]:
+            btn = tk.Label(tab_bar, text=label, font=F_BOLD,
+                           cursor="hand2", bg=C_SURFACE, padx=20, pady=10)
+            btn.pack(side="left")
+            btn.bind("<Button-1>", lambda _e, k=key: self._switch_people_tab(k))
+            self._people_tab_btns[key] = btn
+        tk.Frame(page, bg=C_SEP, height=1).pack(fill="x")
+
+        # Action bar pinned to bottom
+        tk.Frame(page, bg=C_SEP, height=1).pack(side="bottom", fill="x")
+        action_bar = tk.Frame(page, bg=C_SURFACE)
+        action_bar.pack(side="bottom", fill="x")
+
+        self._people_sel_var = tk.StringVar(value="")
+        tk.Label(action_bar, textvariable=self._people_sel_var,
+                 font=F_SM, bg=C_SURFACE, fg=C_MUTED).pack(side="left", padx=16, pady=10)
+
+        sel_all = tk.Label(action_bar, text="Select All", font=F_SM,
+                           fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
+        sel_all.pack(side="left", padx=(0, 12))
+        sel_all.bind("<Button-1>", lambda _e: self._people_select_all(True))
+
+        desel_all = tk.Label(action_bar, text="Deselect All", font=F_SM,
+                             fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
+        desel_all.pack(side="left")
+        desel_all.bind("<Button-1>", lambda _e: self._people_select_all(False))
+
+        self._people_unfollow_btn = RoundedButton(
+            action_bar, "Unfollow Selected", self._unfollow_selected,
+            width=155, height=32, bg=C_DANGER, font=F_SM,
+        )
+        self._people_unfollow_btn.pack(side="right", padx=16, pady=8)
+
+        # Scrollable list area fills remaining space
+        list_outer = tk.Frame(page, bg=C_BG)
+        list_outer.pack(fill="both", expand=True)
+
+        self._people_canvas = tk.Canvas(list_outer, bg=C_BG, highlightthickness=0)
+        people_sb = tk.Scrollbar(list_outer, orient="vertical",
+                                  command=self._people_canvas.yview)
+        self._people_canvas.configure(yscrollcommand=people_sb.set)
+        people_sb.pack(side="right", fill="y")
+        self._people_canvas.pack(side="left", fill="both", expand=True)
+
+        self._people_list_frame = tk.Frame(self._people_canvas, bg=C_BG)
+        self._people_list_win = self._people_canvas.create_window(
+            (0, 0), window=self._people_list_frame, anchor="nw",
+        )
+
+        self._people_list_frame.bind(
+            "<Configure>",
+            lambda e: self._people_canvas.configure(
+                scrollregion=self._people_canvas.bbox("all")
+            ),
+        )
+        self._people_canvas.bind(
+            "<Configure>",
+            lambda e: self._people_canvas.itemconfig(self._people_list_win, width=e.width),
+        )
+        self._people_canvas.bind(
+            "<Enter>",
+            lambda _e: self._people_canvas.bind_all(
+                "<MouseWheel>",
+                lambda e: self._people_canvas.yview_scroll(int(-1 * e.delta / 120), "units"),
+            ),
+        )
+        self._people_canvas.bind(
+            "<Leave>",
+            lambda _e: self._people_canvas.unbind_all("<MouseWheel>"),
+        )
+
+        # Internal state
+        self._people_data = {"following": [], "followers": []}
+        self._people_check_vars = {}
+        self._people_loading = False
+
+        # Initial empty state message
+        self._switch_people_tab("following")
+
+    def _switch_people_tab(self, tab: str):
+        self._people_tab_var = tab
+        for key, btn in self._people_tab_btns.items():
+            if key == tab:
+                btn.config(fg=C_ACCENT, font=("Segoe UI", 10, "bold"))
+            else:
+                btn.config(fg=C_MUTED, font=F_BOLD)
+        # Unfollow action only applies to following tab
+        if tab == "following":
+            self._people_unfollow_btn.pack(side="right", padx=16, pady=8)
+        else:
+            self._people_unfollow_btn.pack_forget()
+        self._render_people_list()
+
+    def _render_people_list(self):
+        for w in self._people_list_frame.winfo_children():
+            w.destroy()
+        self._people_check_vars.clear()
+
+        tab = self._people_tab_var
+
+        if self._people_loading:
+            tk.Label(self._people_list_frame, text="Loading...",
+                     font=F_UI, bg=C_BG, fg=C_MUTED).pack(pady=40)
+            self._people_sel_var.set("")
+            return
+
+        data = self._people_data[tab]
+        if not data:
+            msg = ("Click  Refresh  to load data."
+                   if not any(self._people_data.values())
+                   else f"No {tab} found.")
+            tk.Label(self._people_list_frame, text=msg,
+                     font=F_UI, bg=C_BG, fg=C_MUTED).pack(pady=40)
+            self._people_sel_var.set("")
+            return
+
+        # Column header
+        hdr = tk.Frame(self._people_list_frame, bg=C_SURFACE)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="", bg=C_SURFACE, width=3).pack(side="left")
+        tk.Label(hdr, text="Username", font=("Segoe UI", 8, "bold"),
+                 bg=C_SURFACE, fg=C_MUTED, anchor="w").pack(side="left", padx=(4, 0), expand=True, fill="x")
+        tk.Label(hdr, text="Status", font=("Segoe UI", 8, "bold"),
+                 bg=C_SURFACE, fg=C_MUTED, width=7, anchor="center").pack(side="left", padx=8)
+        tk.Label(hdr, text="Time", font=("Segoe UI", 8, "bold"),
+                 bg=C_SURFACE, fg=C_MUTED, width=12, anchor="e").pack(side="right", padx=(0, 16))
+        tk.Frame(self._people_list_frame, bg=C_SEP, height=1).pack(fill="x")
+
+        for i, entry in enumerate(data):
+            login   = entry["login"]
+            mutual  = entry.get("mutual", False)
+            time_str = entry.get("time_str", "")
+            row_bg  = C_BG if i % 2 == 0 else "#262c34"
+
+            row = tk.Frame(self._people_list_frame, bg=row_bg)
+            row.pack(fill="x")
+
+            var = tk.BooleanVar(value=False)
+            self._people_check_vars[login] = var
+
+            tk.Checkbutton(
+                row, variable=var, bg=row_bg,
+                activebackground=row_bg, selectcolor=C_SIDEBAR,
+                relief="flat", command=self._update_people_selection,
+            ).pack(side="left", padx=(8, 0), pady=4)
+
+            name_lbl = tk.Label(row, text=login, font=F_UI,
+                                bg=row_bg, fg=C_ACCENT, cursor="hand2", anchor="w")
+            name_lbl.pack(side="left", padx=(2, 0), expand=True, fill="x")
+            name_lbl.bind("<Button-1>",
+                          lambda _e, l=login: webbrowser.open(f"https://github.com/{l}"))
+
+            if mutual:
+                tk.Label(row, text="mutual", font=F_XS,
+                         bg=C_SUCCESS, fg="white", padx=5, pady=2).pack(side="left", padx=8)
+            else:
+                tk.Label(row, text="", width=7, bg=row_bg).pack(side="left", padx=8)
+
+            tk.Label(row, text=time_str, font=F_SM,
+                     bg=row_bg, fg=C_TEXT2, anchor="e", width=12).pack(side="right", padx=(0, 16))
+
+            tk.Frame(self._people_list_frame, bg=C_SEP, height=1).pack(fill="x")
+
+        self._update_people_selection()
+
+    def _update_people_selection(self):
+        count = sum(1 for v in self._people_check_vars.values() if v.get())
+        total = len(self._people_check_vars)
+        if count == 0:
+            self._people_sel_var.set(f"{total:,} accounts")
+        else:
+            self._people_sel_var.set(f"{count} of {total:,} selected")
+
+    def _people_select_all(self, select: bool):
+        for v in self._people_check_vars.values():
+            v.set(select)
+        self._update_people_selection()
+
+    def _load_people(self):
+        if self._people_loading:
+            return
+        self._people_loading = True
+        self._people_refresh_btn.config_state(disabled=True)
+        self._render_people_list()
+        self._set_status("Loading people data...")
+
+        def _fetch():
+            env   = {**load_env(), **os.environ}
+            token = env.get("GH_TOKEN", "").strip()
+            user  = env.get("GH_USERNAME", "").strip()
+            if not token or not user:
+                self.after(0, lambda: self._people_load_done(None, None, "Credentials not configured."))
+                return
+            try:
+                import requests as _req
+                hdrs = {
+                    "Authorization": f"token {token}",
+                    "Accept": "application/vnd.github.v3+json",
+                }
+
+                def _paginate(url):
+                    results, page = [], 1
+                    while True:
+                        r = _req.get(url, headers=hdrs,
+                                     params={"per_page": 100, "page": page}, timeout=20)
+                        if r.status_code != 200:
+                            break
+                        batch = r.json()
+                        if not batch:
+                            break
+                        results.extend(u["login"].lower() for u in batch)
+                        if len(batch) < 100:
+                            break
+                        page += 1
+                    return results
+
+                following_logins = _paginate(f"https://api.github.com/users/{user}/following")
+                followers_logins = _paginate(f"https://api.github.com/users/{user}/followers")
+                self.after(0, lambda: self._people_load_done(following_logins, followers_logins, None))
+            except Exception as exc:
+                self.after(0, lambda: self._people_load_done(None, None, str(exc)))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _people_load_done(self, following_logins, followers_logins, error):
+        self._people_loading = False
+        self._people_refresh_btn.config_state(disabled=False)
+
+        if error:
+            self._set_status(f"Error: {error}")
+            self._render_people_list()
+            return
+
+        state          = load_state()
+        following_state = state.get("following", {})
+        following_set  = set(following_logins)
+        followers_set  = set(followers_logins)
+
+        following_data = []
+        for login in following_logins:
+            info        = following_state.get(login, {})
+            followed_at = info.get("followed_at", "")
+            following_data.append({
+                "login":      login,
+                "mutual":     login in followers_set,
+                "time_str":   _relative_time(followed_at),
+                "followed_at": followed_at,
+            })
+        # Most-recently followed first; mutuals floated to top
+        following_data.sort(key=lambda x: x.get("followed_at") or "", reverse=True)
+        following_data.sort(key=lambda x: not x["mutual"])
+
+        followers_data = []
+        for login in followers_logins:
+            info        = following_state.get(login, {})
+            followed_at = info.get("followed_at", "")
+            mutual      = login in following_set
+            followers_data.append({
+                "login":    login,
+                "mutual":   mutual,
+                "time_str": f"you: {_relative_time(followed_at)}" if mutual and followed_at else "",
+            })
+        followers_data.sort(key=lambda x: not x["mutual"])
+
+        self._people_data["following"] = following_data
+        self._people_data["followers"] = followers_data
+
+        self._render_people_list()
+        self._set_status(
+            f"Loaded {len(following_logins):,} following, {len(followers_logins):,} followers."
+        )
+
+    def _unfollow_selected(self):
+        selected = [login for login, var in self._people_check_vars.items() if var.get()]
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select at least one account to unfollow.")
+            return
+        preview = "\n".join(f"  \u2022 {l}" for l in selected[:10])
+        if len(selected) > 10:
+            preview += f"\n  \u2026and {len(selected) - 10} more"
+        if not messagebox.askyesno(
+            "Confirm Unfollow",
+            f"Unfollow {len(selected)} account(s)?\n\n{preview}",
+        ):
+            return
+
+        env   = {**load_env(), **os.environ}
+        token = env.get("GH_TOKEN", "").strip()
+        if not token:
+            messagebox.showerror("Missing credentials", "GH_TOKEN is not configured.")
+            return
+
+        self._people_unfollow_btn.config_state(disabled=True)
+        self._people_refresh_btn.config_state(disabled=True)
+        self._set_status(f"Unfollowing {len(selected)} accounts...")
+
+        def _do():
+            import requests as _req
+            hdrs = {
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json",
+            }
+            success, failed = [], []
+            for login in selected:
+                try:
+                    r = _req.delete(
+                        f"https://api.github.com/user/following/{login}",
+                        headers=hdrs, timeout=15,
+                    )
+                    (success if r.status_code in (204, 404) else failed).append(login)
+                except Exception:
+                    failed.append(login)
+                time.sleep(0.5)
+            self.after(0, lambda: self._unfollow_done(success, failed))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _unfollow_done(self, success: list, failed: list):
+        if success:
+            state = load_state()
+            for login in success:
+                state["following"].pop(login, None)
+            state["stats"]["unfollowed"] = state["stats"].get("unfollowed", 0) + len(success)
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+            success_set = set(success)
+            self._people_data["following"] = [
+                e for e in self._people_data["following"]
+                if e["login"] not in success_set
+            ]
+
+        self._render_people_list()
+        self._people_unfollow_btn.config_state(disabled=False)
+        self._people_refresh_btn.config_state(disabled=False)
+
+        msg = f"Unfollowed {len(success)}"
+        if failed:
+            msg += f"  ({len(failed)} failed)"
+        self._set_status(msg)
+        self._refresh_dashboard()
 
     # ── Settings page ──────────────────────────────────────────────────────────
 
