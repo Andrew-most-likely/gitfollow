@@ -264,8 +264,9 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
     query = f"type:user followers:>={MIN_FOLLOWERS} repos:>=1"
     pages_needed = min((FOLLOW_LIMIT // 100) + 3, 10)  # Search API caps at 10 pages / 1000 results
 
-    log.info("Searching for candidates (sort=%s order=%s) …", sort, order)
+    log.info("Searching for candidates (sort=%s order=%s) ...", sort, order)
     for page in range(1, pages_needed + 1):
+        log.info("Fetching search page %d/%d ...", page, pages_needed)
         resp = api_get("https://api.github.com/search/users", {
             "q": query,
             "sort": sort,
@@ -274,16 +275,18 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
             "page": page,
         })
         if resp.status_code != 200:
-            log.warning("Search API returned %s -falling back to /users", resp.status_code)
+            log.warning("Search API returned %s - falling back to /users", resp.status_code)
             break
         items = resp.json().get("items", [])
         if not items:
             break
+        before = len(candidates)
         for u in items:
             login = u["login"].lower()
             if login not in skip:
                 candidates.append(login)
                 skip.add(login)
+        log.info("Page %d: %d new candidates (total so far: %d)", page, len(candidates) - before, len(candidates))
         time.sleep(2)  # Search API rate limit: 30 req/min authenticated
 
     # Fallback: global /users list if search yielded nothing
@@ -314,14 +317,17 @@ def do_follows(state: dict, my_following: set, my_followers: set):
     pool  = candidate_pool(already_tracked, my_following)
     cache = state.setdefault("quality_cache", {})
 
-    followed = 0
-    now_iso  = datetime.now(timezone.utc).isoformat()
+    followed  = 0
+    checked   = 0
+    now_iso   = datetime.now(timezone.utc).isoformat()
+    pool_size = len(pool)
+    log.info("Checking quality of %d candidates ...", pool_size)
 
     for login in pool:
         if followed >= FOLLOW_LIMIT:
             break
         if checks_remaining() < 50:
-            log.warning("API quota nearly exhausted -stopping follows early")
+            log.warning("API quota nearly exhausted - stopping follows early")
             break
 
         # Skip if they already follow us (no point in the follow-back game)
@@ -332,8 +338,9 @@ def do_follows(state: dict, my_following: set, my_followers: set):
 
         # Quality gate (cached)
         ok, reason = cached_quality_check(login, cache)
+        checked += 1
         if not ok:
-            log.debug("Skipping %s: %s", login, reason)
+            log.info("  [%d/%d] Skipping %s: %s", checked, pool_size, login, reason)
             continue
 
         code = api_put(f"https://api.github.com/user/following/{login}")
