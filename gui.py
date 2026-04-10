@@ -213,7 +213,8 @@ class App(tk.Tk):
         grid.pack(fill="x")
 
         cards = [
-            ("following",  "Currently Following"),
+            ("following",  "Following (GitHub)"),
+            ("followers",  "Followers (GitHub)"),
             ("mutual",     "Mutual Follows"),
             ("unfollowed", "Total Unfollowed"),
             ("followed",   "Total Followed"),
@@ -240,17 +241,54 @@ class App(tk.Tk):
         self._dash_ts.pack(side="left", padx=12)
 
     def _refresh_dashboard(self):
+        # Load local state for tool-tracked stats
         state  = load_state()
         stats  = state.get("stats", {})
-        following = state.get("following", {})
         cache  = state.get("quality_cache", {})
 
-        self._stat_vars["following"].set(f"{len(following):,}")
         self._stat_vars["mutual"].set(f"{stats.get('mutual', 0):,}")
         self._stat_vars["unfollowed"].set(f"{stats.get('unfollowed', 0):,}")
         self._stat_vars["followed"].set(f"{stats.get('followed', 0):,}")
         self._stat_vars["cached"].set(f"{len(cache):,}")
-        self._dash_ts.config(text=f"Updated {datetime.now().strftime('%H:%M:%S')}")
+        self._dash_ts.config(text="Fetching live stats...")
+
+        # Fetch live following/followers counts from GitHub API in background
+        def _fetch():
+            env = {**load_env(), **os.environ}
+            token    = env.get("GH_TOKEN", "").strip()
+            username = env.get("GH_USERNAME", "").strip()
+            if not token or not username:
+                self.after(0, lambda: self._dash_ts.config(
+                    text="Set GH_TOKEN and GH_USERNAME in Settings to see live counts."
+                ))
+                return
+            try:
+                import requests
+                resp = requests.get(
+                    f"https://api.github.com/users/{username}",
+                    headers={"Authorization": f"token {token}",
+                             "Accept": "application/vnd.github.v3+json"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    following_count = data.get("following", 0)
+                    followers_count = data.get("followers", 0)
+                    self.after(0, lambda f=following_count, fo=followers_count: (
+                        self._stat_vars["following"].set(f"{f:,}"),
+                        self._stat_vars["followers"].set(f"{fo:,}"),
+                        self._dash_ts.config(
+                            text=f"Updated {datetime.now().strftime('%H:%M:%S')}"
+                        ),
+                    ))
+                else:
+                    self.after(0, lambda: self._dash_ts.config(
+                        text=f"API error {resp.status_code} — check your token."
+                    ))
+            except Exception as e:
+                self.after(0, lambda: self._dash_ts.config(text=f"Error: {e}"))
+
+        threading.Thread(target=_fetch, daemon=True).start()
 
     # ── Run tab ───────────────────────────────────────────────────────────────
 
