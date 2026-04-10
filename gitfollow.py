@@ -485,45 +485,58 @@ def do_quality_unfollows(state: dict, my_following: set):
         l for l in my_following
         if l not in WHITELIST and not state["following"].get(l, {}).get("mutual")
     ]
+    total = len(candidates)
     quota = checks_remaining()
     cache_hits = 0
 
-    unfollowed = 0
-    for i, login in enumerate(candidates):
+    log.info("Scanning %d followed accounts for quality (quota=%d) ...", total, quota)
+
+    # Phase 1: scan the full list, log each result, build to_drop
+    for i, login in enumerate(candidates, 1):
         if stop_event.is_set():
-            log.info("Stop requested - halting quality unfollow pass.")
+            log.info("Stop requested - halting quality unfollow scan.")
             break
-        # Re-check quota every 50 users instead of every user
-        if i % 50 == 0:
+        if i % 50 == 1 and i > 1:
             quota = checks_remaining()
         if quota < 150:
-            log.warning("API quota low -stopping quality-unfollow checks early")
+            log.warning("API quota low - stopping quality-unfollow checks early")
             break
 
-        # cached_quality_check skips the API entirely if a fresh result exists
         was_cached = login in cache
         ok, reason = cached_quality_check(login, cache)
         if was_cached:
             cache_hits += 1
 
-        if not ok:
-            code = api_delete(f"https://api.github.com/user/following/{login}")
-            if code in (204, 404):
-                log.info("Quality-unfollowed %s (%s)", login, reason)
-                state["following"].pop(login, None)
-                state["stats"]["unfollowed"] += 1
-                unfollowed += 1
-            else:
-                log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
-            time.sleep(0.5)
+        if ok:
+            log.info("  [%d/%d] Keeping %s (good quality)", i, total, login)
+            time.sleep(0.1)
         else:
-            # Read-only pass -no secondary rate limit risk, short sleep is fine
+            log.info("  [%d/%d] Queued to unfollow %s: %s", i, total, login, reason)
+            to_drop.append((login, reason))
             time.sleep(0.1)
 
     log.info(
-        "Quality unfollow: evaluated=%d  cache_hits=%d  unfollowed=%d",
-        len(candidates), cache_hits, unfollowed,
+        "Scan complete: evaluated=%d  cache_hits=%d  to_unfollow=%d",
+        total, cache_hits, len(to_drop),
     )
+
+    # Phase 2: unfollow the queued accounts
+    unfollowed = 0
+    for login, reason in to_drop:
+        if stop_event.is_set():
+            log.info("Stop requested - halting quality unfollow pass.")
+            break
+        code = api_delete(f"https://api.github.com/user/following/{login}")
+        if code in (204, 404):
+            log.info("Quality-unfollowed %s (%s)", login, reason)
+            state["following"].pop(login, None)
+            state["stats"]["unfollowed"] += 1
+            unfollowed += 1
+        else:
+            log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
+        time.sleep(0.5)
+
+    log.info("Quality unfollow complete: unfollowed=%d", unfollowed)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
