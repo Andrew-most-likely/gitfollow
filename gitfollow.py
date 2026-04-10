@@ -44,7 +44,7 @@ from pathlib import Path
 
 TOKEN        = os.environ["GH_TOKEN"]
 USERNAME     = os.environ["GH_USERNAME"]
-FOLLOW_LIMIT      = int(os.environ.get("FOLLOW_LIMIT", 400))
+FOLLOW_LIMIT      = int(os.environ.get("FOLLOW_LIMIT", 150))
 UNFOLLOW_HRS      = int(os.environ.get("UNFOLLOW_HOURS", 24))
 WHITELIST         = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
 STATE_FILE        = Path(os.environ.get("STATE_FILE", "data/state.json"))
@@ -56,6 +56,7 @@ QUALITY_UNFOLLOW  = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true
 HEADERS = {
     "Authorization": f"token {TOKEN}",
     "Accept": "application/vnd.github.v3+json",
+    "User-Agent": "GitFollow/1.5 (+https://github.com/Andrew-most-likely/gitfollow)",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

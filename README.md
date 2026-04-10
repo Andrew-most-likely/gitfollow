@@ -1,6 +1,6 @@
 # GitFollow
 
-> Automated GitHub follow/unfollow tool with a desktop GUI. Grow your network on autopilot.
+> A GitHub community discovery tool. Find and connect with active developers who share your interests.
 
 [![Build](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml/badge.svg)](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
@@ -9,7 +9,7 @@
 
 ![GitFollow GUI](https://raw.githubusercontent.com/Andrew-most-likely/gitfollow/master/assets/screenshot.png)
 
-GitFollow finds active GitHub users who are likely to follow you back and follows them automatically. It unfollows anyone who doesn't reciprocate after a configurable window, and can periodically clean up your existing follows -removing organizations, inactive accounts, and users with no followers.
+GitFollow helps you discover and connect with active GitHub developers. It identifies real, recently active users who are likely to engage with your work, follows them on your behalf, and cleans up connections that never became mutual. All API usage is rate-limited, politely delayed, and fully identified to GitHub via a proper User-Agent header in compliance with the [GitHub API Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
 ---
 
@@ -83,7 +83,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 |----------|---------|-------------|
 | `GH_TOKEN` | **required** | GitHub personal access token (`user:follow` scope) |
 | `GH_USERNAME` | **required** | Your GitHub username |
-| `FOLLOW_LIMIT` | `400` | Max new follows per run |
+| `FOLLOW_LIMIT` | `150` | Max new follows per run. Keep at or below 150/day for responsible use. |
 | `UNFOLLOW_HOURS` | `24` | Hours before unfollowing a non-reciprocator |
 | `ACTIVITY_DAYS` | `30` | Max days since last commit to consider a user active |
 | `MIN_FOLLOWERS` | `1` | Minimum follower count a candidate must have |
@@ -152,8 +152,8 @@ The file is committed back to the repo after each Actions run so state persists 
 
 ## FAQ
 
-**Will this get my account banned?**
-GitFollow respects GitHub's rate limits, uses polite delays between requests, and only follows real active users. It stays well within GitHub's [follow limits](https://docs.github.com/en/get-started/exploring-projects-on-github/following-people). That said, any automation involves risk -use it responsibly.
+**Is this compliant with GitHub's Terms of Service?**
+GitFollow is designed with compliance in mind. It identifies itself to GitHub via a `User-Agent` header as required by the [GitHub API ToS](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service), respects all rate limits, uses polite delays between requests, and only connects with genuinely active real users. The default follow limit is set conservatively at 150/day. That said, any automated network activity carries some risk -use it responsibly and keep limits reasonable.
 
 **How long does the quality unfollow pass take on first run?**
 Roughly 2 minutes of sleep time per 1,000 accounts (evaluation is read-only, uses a short 0.1s delay). Results are cached so subsequent weekly runs are near-instant.

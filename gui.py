@@ -587,8 +587,8 @@ class App(tk.Tk):
              "This is stored locally in .env and never shared."),
             ("GH_USERNAME",    "GitHub Username",       False, "",
              "Your exact GitHub username (case-insensitive)."),
-            ("FOLLOW_LIMIT",   "Follow Limit",          False, "400",
-             "Maximum new accounts to follow per run. GitHub recommends staying under 400 per day."),
+            ("FOLLOW_LIMIT",   "Follow Limit",          False, "150",
+             "Maximum new accounts to follow per run. Keep at or below 150/day for responsible use and to stay well within GitHub's guidelines."),
             ("UNFOLLOW_HOURS", "Unfollow After (hrs)",  False, "24",
              "How many hours to wait before unfollowing someone who has not followed you back. "
              "Default is 24 hours."),
