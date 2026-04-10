@@ -87,7 +87,7 @@ Browse and manage your network without running a full pass.
 - **Paginated** - 50 accounts per page for fast rendering even with large lists
 - Usernames are clickable links that open the GitHub profile in your browser
 
-<img width="1904" height="1274" alt="Run" src="https://github.com/user-attachments/assets/b086a540-87de-4994-84f6-93ca448d7bde" />
+<img width="1906" height="1262" alt="image" src="https://github.com/user-attachments/assets/3516978f-2e7e-456f-beec-1d3270f35a0f" />
 
 ---
 
