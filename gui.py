@@ -261,7 +261,8 @@ class App(tk.Tk):
         super().__init__()
         self.title("GitFollow")
         self.geometry("960x640")
-        self.resizable(False, False)
+        self.resizable(True, True)
+        self.minsize(960, 640)
         self.configure(bg=C_SIDEBAR)
         self._running       = False
         self._pages         = {}
@@ -868,6 +869,23 @@ class App(tk.Tk):
         desel_all.pack(side="left")
         desel_all.bind("<Button-1>", lambda _e: self._people_select_all(False))
 
+        tk.Label(action_bar, text="|", font=F_SM,
+                 bg=C_SURFACE, fg=C_SEP).pack(side="left", padx=10)
+
+        self._people_prev_lbl = tk.Label(action_bar, text="< Prev", font=F_SM,
+                                          fg=C_MUTED, bg=C_SURFACE)
+        self._people_prev_lbl.pack(side="left")
+        self._people_prev_lbl.bind("<Button-1>", lambda _e: self._people_prev_page())
+
+        self._people_page_var = tk.StringVar(value="")
+        tk.Label(action_bar, textvariable=self._people_page_var, font=F_SM,
+                 bg=C_SURFACE, fg=C_MUTED).pack(side="left", padx=6)
+
+        self._people_next_lbl = tk.Label(action_bar, text="Next >", font=F_SM,
+                                          fg=C_MUTED, bg=C_SURFACE)
+        self._people_next_lbl.pack(side="left")
+        self._people_next_lbl.bind("<Button-1>", lambda _e: self._people_next_page())
+
         self._people_unfollow_btn = RoundedButton(
             action_bar, "Unfollow Selected", self._unfollow_selected,
             width=155, height=32, bg=C_DANGER, font=F_SM,
@@ -916,12 +934,15 @@ class App(tk.Tk):
         self._people_data = {"following": [], "followers": []}
         self._people_check_vars = {}
         self._people_loading = False
+        self._people_page = 0
+        self._people_page_size = 50
 
         # Initial empty state message
         self._switch_people_tab("following")
 
     def _switch_people_tab(self, tab: str):
         self._people_tab_var = tab
+        self._people_page = 0
         for key, btn in self._people_tab_btns.items():
             if key == tab:
                 btn.config(fg=C_ACCENT, font=("Segoe UI", 10, "bold"))
@@ -941,10 +962,11 @@ class App(tk.Tk):
 
         tab = self._people_tab_var
 
-        if self._people_loading:
+        if self._people_loading and not self._people_data[tab]:
             tk.Label(self._people_list_frame, text="Loading...",
                      font=F_UI, bg=C_BG, fg=C_MUTED).pack(pady=40)
             self._people_sel_var.set("")
+            self._people_page_var.set("")
             return
 
         data = self._people_data[tab]
@@ -955,7 +977,24 @@ class App(tk.Tk):
             tk.Label(self._people_list_frame, text=msg,
                      font=F_UI, bg=C_BG, fg=C_MUTED).pack(pady=40)
             self._people_sel_var.set("")
+            self._people_page_var.set("")
             return
+
+        # Pagination
+        total       = len(data)
+        page_size   = self._people_page_size
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        self._people_page = max(0, min(self._people_page, total_pages - 1))
+        start     = self._people_page * page_size
+        page_data = data[start:start + page_size]
+
+        self._people_page_var.set(f"  {self._people_page + 1} / {total_pages}  ")
+        no_prev = self._people_page == 0
+        no_next = self._people_page >= total_pages - 1
+        self._people_prev_lbl.config(fg=C_MUTED if no_prev else C_ACCENT,
+                                      cursor="" if no_prev else "hand2")
+        self._people_next_lbl.config(fg=C_MUTED if no_next else C_ACCENT,
+                                      cursor="" if no_next else "hand2")
 
         # Column header
         hdr = tk.Frame(self._people_list_frame, bg=C_SURFACE)
@@ -969,11 +1008,11 @@ class App(tk.Tk):
                  bg=C_SURFACE, fg=C_MUTED, width=12, anchor="e").pack(side="right", padx=(0, 16))
         tk.Frame(self._people_list_frame, bg=C_SEP, height=1).pack(fill="x")
 
-        for i, entry in enumerate(data):
-            login   = entry["login"]
-            mutual  = entry.get("mutual", False)
+        for i, entry in enumerate(page_data):
+            login    = entry["login"]
+            mutual   = entry.get("mutual", False)
             time_str = entry.get("time_str", "")
-            row_bg  = C_BG if i % 2 == 0 else "#262c34"
+            row_bg   = C_BG if i % 2 == 0 else "#262c34"
 
             row = tk.Frame(self._people_list_frame, bg=row_bg)
             row.pack(fill="x")
@@ -983,7 +1022,7 @@ class App(tk.Tk):
 
             tk.Checkbutton(
                 row, variable=var, bg=row_bg,
-                activebackground=row_bg, selectcolor=C_SIDEBAR,
+                activebackground=row_bg, selectcolor=C_SUCCESS,
                 relief="flat", command=self._update_people_selection,
             ).pack(side="left", padx=(8, 0), pady=4)
 
@@ -1007,12 +1046,13 @@ class App(tk.Tk):
         self._update_people_selection()
 
     def _update_people_selection(self):
-        count = sum(1 for v in self._people_check_vars.values() if v.get())
-        total = len(self._people_check_vars)
+        count      = sum(1 for v in self._people_check_vars.values() if v.get())
+        page_count = len(self._people_check_vars)
+        total      = len(self._people_data.get(self._people_tab_var, []))
         if count == 0:
-            self._people_sel_var.set(f"{total:,} accounts")
+            self._people_sel_var.set(f"{total:,} total")
         else:
-            self._people_sel_var.set(f"{count} of {total:,} selected")
+            self._people_sel_var.set(f"{count} of {page_count} selected")
 
     def _people_select_all(self, select: bool):
         for v in self._people_check_vars.values():
@@ -1023,9 +1063,9 @@ class App(tk.Tk):
         if self._people_loading:
             return
         self._people_loading = True
+        self._people_page = 0
         self._people_refresh_btn.config_state(disabled=True)
         self._render_people_list()
-        self._set_status("Loading people data...")
 
         def _fetch():
             env   = {**load_env(), **os.environ}
@@ -1041,9 +1081,11 @@ class App(tk.Tk):
                     "Accept": "application/vnd.github.v3+json",
                 }
 
-                def _paginate(url):
+                def _paginate(url, label):
                     results, page = [], 1
                     while True:
+                        self.after(0, lambda n=len(results), lbl=label:
+                                   self._set_status(f"Fetching {lbl}... ({n} loaded)"))
                         r = _req.get(url, headers=hdrs,
                                      params={"per_page": 100, "page": page}, timeout=20)
                         if r.status_code != 200:
@@ -1057,13 +1099,56 @@ class App(tk.Tk):
                         page += 1
                     return results
 
-                following_logins = _paginate(f"https://api.github.com/users/{user}/following")
-                followers_logins = _paginate(f"https://api.github.com/users/{user}/followers")
+                following_logins = _paginate(
+                    f"https://api.github.com/users/{user}/following", "following"
+                )
+                # Show following list immediately while fetching followers
+                self.after(0, lambda f=list(following_logins): self._people_show_partial(f))
+
+                followers_logins = _paginate(
+                    f"https://api.github.com/users/{user}/followers", "followers"
+                )
                 self.after(0, lambda: self._people_load_done(following_logins, followers_logins, None))
             except Exception as exc:
                 self.after(0, lambda: self._people_load_done(None, None, str(exc)))
 
         threading.Thread(target=_fetch, daemon=True).start()
+
+    def _people_show_partial(self, following_logins: list):
+        """Show the following list immediately before followers finish loading."""
+        state           = load_state()
+        following_state = state.get("following", {})
+        following_data  = []
+        for login in following_logins:
+            info        = following_state.get(login, {})
+            followed_at = info.get("followed_at", "")
+            following_data.append({
+                "login":       login,
+                "mutual":      False,
+                "time_str":    _relative_time(followed_at),
+                "followed_at": followed_at,
+            })
+        following_data.sort(key=lambda x: x.get("followed_at") or "", reverse=True)
+        self._people_data["following"] = following_data
+        if self._people_tab_var == "following":
+            self._render_people_list()
+        self._set_status(
+            f"Loaded {len(following_logins):,} following — fetching followers..."
+        )
+
+    def _people_prev_page(self):
+        if self._people_page > 0:
+            self._people_page -= 1
+            self._render_people_list()
+            self._people_canvas.yview_moveto(0)
+
+    def _people_next_page(self):
+        data        = self._people_data.get(self._people_tab_var, [])
+        total_pages = max(1, (len(data) + self._people_page_size - 1) // self._people_page_size)
+        if self._people_page < total_pages - 1:
+            self._people_page += 1
+            self._render_people_list()
+            self._people_canvas.yview_moveto(0)
 
     def _people_load_done(self, following_logins, followers_logins, error):
         self._people_loading = False
