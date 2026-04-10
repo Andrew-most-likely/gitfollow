@@ -27,7 +27,7 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "2.0.4"
+VERSION = "2.1.0"
 
 # ── GitHub Dark Dimmed color tokens ───────────────────────────────────────────
 
@@ -804,10 +804,33 @@ class App(tk.Tk):
                           "Saved to a local .env file - never committed to git.")
 
         # Scrollable container
-        content = tk.Frame(page, bg=C_BG)
-        content.pack(fill="both", expand=True, padx=20, pady=20)
+        outer = tk.Frame(page, bg=C_BG)
+        outer.pack(fill="both", expand=True)
 
-        card = self._card(content, fill="x")
+        canvas = tk.Canvas(outer, bg=C_BG, highlightthickness=0)
+        scrollbar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        content = tk.Frame(canvas, bg=C_BG)
+        _win_id = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        def _on_content_resize(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_resize(e):
+            canvas.itemconfig(_win_id, width=e.width)
+
+        content.bind("<Configure>", _on_content_resize)
+        canvas.bind("<Configure>", _on_canvas_resize)
+        canvas.bind_all("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(int(-1 * e.delta / 120), "units"))
+
+        inner = tk.Frame(content, bg=C_BG)
+        inner.pack(fill="x", padx=20, pady=20)
+
+        card = self._card(inner, fill="x")
         form = tk.Frame(card, bg=C_SURFACE)
         form.pack(fill="x", padx=24, pady=16)
 
