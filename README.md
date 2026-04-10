@@ -1,34 +1,34 @@
 # GitFollow
 
-> Automated GitHub follow/unfollow tool with a desktop GUI — grow your network on autopilot.
+> Automated GitHub follow/unfollow tool with a desktop GUI. Grow your network on autopilot.
 
 [![Build](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml/badge.svg)](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-GitFollow finds active GitHub users who are likely to follow you back and follows them automatically. It unfollows anyone who doesn't reciprocate after a configurable window, and can periodically clean up your existing follows — removing organizations, inactive accounts, and users with no followers.
+GitFollow finds active GitHub users who are likely to follow you back and follows them automatically. It unfollows anyone who doesn't reciprocate after a configurable window, and can periodically clean up your existing follows -removing organizations, inactive accounts, and users with no followers.
 
 ---
 
 ## Features
 
-- **Smart candidate sourcing** — searches GitHub for real users with followers and recent repos, not random IDs
-- **Activity filtering** — skips anyone who hasn't pushed a commit in the last 30 days
-- **Org/bot detection** — never follows organizations or accounts flagged as non-users
-- **Auto-unfollow** — unfollows non-reciprocators after a configurable time window
-- **Quality cleanup** — optional weekly pass to unfollow existing follows that have gone inactive
-- **Quality cache** — remembers check results for 7 days to minimize API usage on repeat runs
-- **Desktop GUI** — setup wizard, live stats dashboard, and run controls — no terminal needed
-- **GitHub Actions** — runs on a schedule with zero infrastructure, free on public repos
+- **Smart candidate sourcing** -searches GitHub for real users with followers and recent repos, not random IDs
+- **Activity filtering** -skips anyone who hasn't pushed a commit in the last 30 days
+- **Org/bot detection** -never follows organizations or accounts flagged as non-users
+- **Auto-unfollow** -unfollows non-reciprocators after a configurable time window
+- **Quality cleanup** -optional weekly pass to unfollow existing follows that have gone inactive
+- **Quality cache** -remembers check results for 7 days to minimize API usage on repeat runs
+- **Desktop GUI** -setup wizard, live stats dashboard, and run controls -no terminal needed
+- **GitHub Actions** -runs on a schedule with zero infrastructure, free on public repos
 
 ---
 
 ## Getting Started
 
-### Option 1 — Download the GUI (easiest, no Python needed)
+### Option 1 -Download the GUI (easiest, no Python needed)
 
 1. Go to [**Releases**](https://github.com/Andrew-most-likely/gitfollow/releases) and download `GitFollow.exe`
-2. Double-click it — no install required
+2. Double-click it -no install required
 3. Open the **Settings** tab, enter your GitHub token and username, click **Save Settings**
 4. Open the **Setup** tab and click **Re-check** to confirm everything is ready
 5. Click **Run → Run Follow** to start
@@ -39,9 +39,9 @@ GitFollow finds active GitHub users who are likely to follow you back and follow
 
 ---
 
-### Option 2 — Fork for automated scheduling (GitHub Actions)
+### Option 2 -Fork for automated scheduling (GitHub Actions)
 
-This runs everything on GitHub's servers automatically — no computer needs to stay on.
+This runs everything on GitHub's servers automatically -no computer needs to stay on.
 
 1. [**Fork this repo**](https://github.com/Andrew-most-likely/gitfollow/fork)
 2. Go to your fork → **Settings → Secrets and variables → Actions**
@@ -58,7 +58,7 @@ The **follow** workflow runs daily at 09:00 UTC. The **quality unfollow** workfl
 
 ---
 
-### Option 3 — Run from source
+### Option 3 -Run from source
 
 ```bash
 git clone https://github.com/Andrew-most-likely/gitfollow
@@ -86,7 +86,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 | `MIN_FOLLOWERS` | `1` | Minimum follower count a candidate must have |
 | `CACHE_DAYS` | `7` | Days to cache quality check results |
 | `QUALITY_UNFOLLOW` | `false` | Set to `true` to unfollow existing follows failing quality criteria |
-| `WHITELIST` | — | Comma-separated usernames to never unfollow |
+| `WHITELIST` | -| Comma-separated usernames to never unfollow |
 | `STATE_FILE` | `data/state.json` | Path to the state file |
 
 ---
@@ -95,9 +95,9 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 
 ### Follow pass (daily)
 1. Queries GitHub search for real users with at least `MIN_FOLLOWERS` followers and at least one repo
-2. For each candidate, checks their profile — skips orgs, users with too few followers, and profiles with no recent activity
+2. For each candidate, checks their profile -skips orgs, users with too few followers, and profiles with no recent activity
 3. Fetches the last 100 public events to confirm a `PushEvent` within `ACTIVITY_DAYS`
-4. Caches the result for `CACHE_DAYS` days — repeated runs skip already-checked accounts entirely
+4. Caches the result for `CACHE_DAYS` days -repeated runs skip already-checked accounts entirely
 5. Follows up to `FOLLOW_LIMIT` qualifying users with a polite delay between each
 
 ### Unfollow pass (daily, same run)
@@ -108,7 +108,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 ### Quality unfollow pass (weekly, opt-in)
 1. Scans your entire following list against quality criteria
 2. Unfollows orgs, inactive users, and users with no followers
-3. Uses cached results — after the first run (which is slow) subsequent passes take minutes
+3. Uses cached results -after the first run (which is slow) subsequent passes take minutes
 
 ---
 
@@ -132,7 +132,7 @@ pyinstaller --onefile --windowed --name GitFollow --add-data "gitfollow.py;." gu
 # Output: dist/GitFollow.exe
 ```
 
-Or trigger the **Build Windows Exe** workflow from the Actions tab — the `.exe` is uploaded as a downloadable artifact.
+Or trigger the **Build Windows Exe** workflow from the Actions tab -the `.exe` is uploaded as a downloadable artifact.
 
 ---
 
@@ -150,13 +150,13 @@ The file is committed back to the repo after each Actions run so state persists 
 ## FAQ
 
 **Will this get my account banned?**
-GitFollow respects GitHub's rate limits, uses polite delays between requests, and only follows real active users. It stays well within GitHub's [follow limits](https://docs.github.com/en/get-started/exploring-projects-on-github/following-people). That said, any automation involves risk — use it responsibly.
+GitFollow respects GitHub's rate limits, uses polite delays between requests, and only follows real active users. It stays well within GitHub's [follow limits](https://docs.github.com/en/get-started/exploring-projects-on-github/following-people). That said, any automation involves risk -use it responsibly.
 
 **How long does the quality unfollow pass take on first run?**
 Roughly 2 minutes of sleep time per 1,000 accounts (evaluation is read-only, uses a short 0.1s delay). Results are cached so subsequent weekly runs are near-instant.
 
 **Can I use this on macOS or Linux?**
-`gitfollow.py` and the GitHub Actions workflows work on any OS. The GUI (`gui.py`) also works cross-platform via Python. The pre-built `.exe` is Windows only — Mac/Linux users should run `python gui.py`.
+`gitfollow.py` and the GitHub Actions workflows work on any OS. The GUI (`gui.py`) also works cross-platform via Python. The pre-built `.exe` is Windows only -Mac/Linux users should run `python gui.py`.
 
-**The token field is masked — how do I edit it?**
+**The token field is masked -how do I edit it?**
 Clear the field and type your new token. The masking is display-only.
