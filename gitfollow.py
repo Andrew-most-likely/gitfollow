@@ -8,8 +8,13 @@ Strategy:
   4. Commit updated state back to the repo (when run via GitHub Actions).
 
 Quality criteria for a follow candidate:
+  - Username must not match bot/mirror/archive/numeric-only patterns
   - Must be a regular User (not an Organization or bot)
   - Must have at least MIN_FOLLOWERS followers
+  - Must have fewer than MAX_REPOS public repos (filters mass-forking bots)
+  - following/followers ratio must be below MAX_FF_RATIO (filters follow-farmers)
+  - Account must be at least MIN_ACCOUNT_AGE_DAYS old (filters throwaway accounts)
+  - Must have at least one of: name, bio, or email set (filters unconfigured bots)
   - Must have pushed a commit within the last ACTIVITY_DAYS days
 
 Quality check results are cached in state.json for CACHE_DAYS days to avoid
@@ -24,13 +29,17 @@ Optional env vars:
   UNFOLLOW_HOURS    - Hours before unfollowing non-followers (default: 24)
   WHITELIST         - Comma-separated usernames to never unfollow
   STATE_FILE        - Path to state JSON file (default: data/state.json)
-  ACTIVITY_DAYS     - Days of inactivity before skipping a candidate (default: 30)
-  MIN_FOLLOWERS     - Minimum followers a candidate must have (default: 1)
-  CACHE_DAYS        - How long to cache quality check results (default: 7)
-  QUALITY_UNFOLLOW  - Set to "true" to unfollow existing follows that fail quality criteria
+  ACTIVITY_DAYS        - Days of inactivity before skipping a candidate (default: 30)
+  MIN_FOLLOWERS        - Minimum followers a candidate must have (default: 1)
+  MAX_REPOS            - Skip accounts with more public repos than this (default: 500)
+  MAX_FF_RATIO         - Skip accounts whose following/followers ratio exceeds this (default: 10.0)
+  MIN_ACCOUNT_AGE_DAYS - Skip accounts newer than this many days (default: 30)
+  CACHE_DAYS           - How long to cache quality check results (default: 7)
+  QUALITY_UNFOLLOW     - Set to "true" to unfollow existing follows that fail quality criteria
 """
 
 import os
+import re
 import json
 import time
 import random
@@ -48,10 +57,16 @@ FOLLOW_LIMIT      = int(os.environ.get("FOLLOW_LIMIT", 150))
 UNFOLLOW_HRS      = int(os.environ.get("UNFOLLOW_HOURS", 24))
 WHITELIST         = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
 STATE_FILE        = Path(os.environ.get("STATE_FILE", "data/state.json"))
-ACTIVITY_DAYS     = int(os.environ.get("ACTIVITY_DAYS", 30))
-MIN_FOLLOWERS     = int(os.environ.get("MIN_FOLLOWERS", 1))
-CACHE_DAYS        = int(os.environ.get("CACHE_DAYS", 7))
-QUALITY_UNFOLLOW  = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true"
+ACTIVITY_DAYS        = int(os.environ.get("ACTIVITY_DAYS", 30))
+MIN_FOLLOWERS        = int(os.environ.get("MIN_FOLLOWERS", 1))
+MAX_REPOS            = int(os.environ.get("MAX_REPOS", 500))
+MAX_FF_RATIO         = float(os.environ.get("MAX_FF_RATIO", 10.0))
+MIN_ACCOUNT_AGE_DAYS = int(os.environ.get("MIN_ACCOUNT_AGE_DAYS", 30))
+CACHE_DAYS           = int(os.environ.get("CACHE_DAYS", 7))
+QUALITY_UNFOLLOW     = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true"
+
+# Bot-like username patterns: all-numeric, or keywords common in automated accounts
+_BOT_NAME_RE = re.compile(r'^\d+$|[\-_]?(bot|mirror|backup|clone|archive|crawler|scraper)[\-_]?', re.I)
 
 HEADERS = {
     "Authorization": f"token {TOKEN}",
@@ -163,9 +178,13 @@ def checks_remaining() -> int:
 def is_quality_candidate(login: str) -> tuple:
     """
     Returns (True, "") if the user is worth following, else (False, reason).
-    Criteria: real User (not Org), has at least MIN_FOLLOWERS followers, pushed
-    a commit within the last ACTIVITY_DAYS days.
+    Free pre-checks run before any API call; profile checks use the single
+    /users/{login} response; push-event check is the only extra API call.
     """
+    # Free pre-check: bot-like username patterns (no API call)
+    if _BOT_NAME_RE.search(login):
+        return False, "bot-like username"
+
     resp = api_get(f"https://api.github.com/users/{login}")
     if resp.status_code != 200:
         return False, "profile fetch failed"
@@ -174,8 +193,33 @@ def is_quality_candidate(login: str) -> tuple:
     if data.get("type", "User") != "User":
         return False, "organization/bot"
 
-    if data.get("followers", 0) < MIN_FOLLOWERS:
+    followers = data.get("followers", 0)
+    if followers < MIN_FOLLOWERS:
         return False, f"fewer than {MIN_FOLLOWERS} followers"
+
+    # Mass-forking / mirror bot: too many repos
+    public_repos = data.get("public_repos", 0)
+    if public_repos > MAX_REPOS:
+        return False, f"too many repos ({public_repos})"
+
+    # Follow-farmer: following far more people than follow them back
+    following = data.get("following", 0)
+    if followers == 0 and following > 50:
+        return False, f"follow-farmer (following={following}, followers=0)"
+    if followers > 0 and following / followers > MAX_FF_RATIO:
+        return False, f"follow-farmer ratio {following}:{followers}"
+
+    # Account too new: throwaway/spam accounts
+    created_at_str = data.get("created_at", "")
+    if created_at_str:
+        created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - created_at).days
+        if age_days < MIN_ACCOUNT_AGE_DAYS:
+            return False, f"account too new ({age_days}d old)"
+
+    # No profile info: unconfigured / bot account
+    if not any([data.get("name"), data.get("bio"), data.get("email")]):
+        return False, "no profile info (name/bio/email all empty)"
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
 
