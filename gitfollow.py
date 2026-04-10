@@ -297,70 +297,107 @@ def do_unfollows(state: dict, my_followers: set):
 
 def candidate_pool(already_in_state: set, my_following: set) -> list:
     """
-    Pull candidates via GitHub user search, pre-filtered to users with followers
-    and repos. Varies sort order each run for diversity.
-    Falls back to the global /users list if search fails.
+    Pull candidates from two high-signal sources:
+      1. Stargazers of popular repos in curated tech topics (primary).
+         People who star real projects are almost always real developers.
+      2. GitHub user search sorted by followers/repos (fallback).
+         Never sorts by join date — that heavily favours brand-new bot accounts.
     """
     skip = already_in_state | my_following | {USERNAME.lower()}
     candidates = []
+    target = FOLLOW_LIMIT * 4  # gather ~4× the limit so quality filter has room to work
 
-    # Vary sort order each run so we don't always get the same accounts
-    sort, order = random.choice([
-        ("joined", "desc"),
-        ("joined", "asc"),
-        ("repositories", "desc"),
-        ("followers", "desc"),
-    ])
-    query = f"type:user followers:>={MIN_FOLLOWERS} repos:>=1"
-    pages_needed = min((FOLLOW_LIMIT // 100) + 3, 10)  # Search API caps at 10 pages / 1000 results
+    # ── Source 1: stargazers of popular repos in curated topics ───────────────
+    topics = random.sample([
+        "python", "javascript", "typescript", "rust", "go", "java",
+        "machine-learning", "web-development", "open-source", "devops",
+        "cli", "api", "data-science", "game-development", "security",
+    ], k=3)
 
-    log.info("Searching for candidates (sort=%s order=%s) ...", sort, order)
-    for page in range(1, pages_needed + 1):
+    for topic in topics:
         if stop_event.is_set():
-            log.info("Stop requested - halting candidate search.")
             break
-        log.info("Fetching search page %d/%d ...", page, pages_needed)
-        resp = api_get("https://api.github.com/search/users", {
-            "q": query,
-            "sort": sort,
-            "order": order,
-            "per_page": 100,
-            "page": page,
+        if len(candidates) >= target:
+            break
+
+        log.info("Finding popular repos in topic: %s ...", topic)
+        resp = api_get("https://api.github.com/search/repositories", {
+            "q": f"topic:{topic} stars:>500",
+            "sort": "stars",
+            "order": "desc",
+            "per_page": 5,
+            "page": random.randint(1, 4),
         })
         if resp.status_code != 200:
-            log.warning("Search API returned %s - falling back to /users", resp.status_code)
-            break
-        items = resp.json().get("items", [])
-        if not items:
-            break
-        before = len(candidates)
-        for u in items:
-            login = u["login"].lower()
-            if login not in skip:
-                candidates.append(login)
-                skip.add(login)
-        log.info("Page %d: %d new candidates (total so far: %d)", page, len(candidates) - before, len(candidates))
-        time.sleep(2)  # Search API rate limit: 30 req/min authenticated
+            log.warning("Repo search failed for topic %s (%s)", topic, resp.status_code)
+            time.sleep(2)
+            continue
 
-    # Fallback: global /users list if search yielded nothing
-    if not candidates:
-        since = random.randint(0, 5_000_000)
-        log.info("Falling back to global users since id=%d …", since)
-        for _ in range(pages_needed):
-            resp = api_get("https://api.github.com/users", {"since": since, "per_page": 100})
-            if resp.status_code != 200:
+        repos = resp.json().get("items", [])
+        time.sleep(2)
+
+        for repo in repos:
+            if stop_event.is_set():
                 break
-            batch = resp.json()
-            if not batch:
+            if len(candidates) >= target:
                 break
-            for u in batch:
+            full_name = repo["full_name"]
+            log.info("Pulling stargazers from %s ...", full_name)
+            # Pick a random page of stargazers so we don't always get the same early followers
+            page = random.randint(1, max(1, repo["stargazers_count"] // 100))
+            page = min(page, 400)  # API won't serve beyond page ~400
+            resp2 = api_get(f"https://api.github.com/repos/{full_name}/stargazers", {
+                "per_page": 100,
+                "page": page,
+            })
+            if resp2.status_code != 200:
+                time.sleep(2)
+                continue
+            for u in resp2.json():
                 login = u["login"].lower()
                 if login not in skip:
                     candidates.append(login)
                     skip.add(login)
-            since = batch[-1]["id"]
+            log.info("  Got %d candidates so far", len(candidates))
+            time.sleep(2)
+
+    # ── Source 2: user search fallback (no join-date sort — attracts new bots) ─
+    if len(candidates) < target:
+        min_followers_search = max(MIN_FOLLOWERS, 5)  # never search for <5 followers
+        sort, order = random.choice([
+            ("repositories", "desc"),
+            ("followers", "desc"),
+            ("followers", "asc"),
+        ])
+        query = f"type:user followers:>={min_followers_search} repos:2..200"
+        pages_needed = min(((target - len(candidates)) // 100) + 2, 10)
+        log.info("User search fallback (sort=%s %s) ...", sort, order)
+        for page in range(1, pages_needed + 1):
+            if stop_event.is_set():
+                break
+            resp = api_get("https://api.github.com/search/users", {
+                "q": query,
+                "sort": sort,
+                "order": order,
+                "per_page": 100,
+                "page": page,
+            })
+            if resp.status_code != 200:
+                log.warning("User search returned %s", resp.status_code)
+                break
+            items = resp.json().get("items", [])
+            if not items:
+                break
+            for u in items:
+                login = u["login"].lower()
+                if login not in skip:
+                    candidates.append(login)
+                    skip.add(login)
+            log.info("Search page %d: %d total candidates", page, len(candidates))
+            time.sleep(2)
 
     random.shuffle(candidates)
+    log.info("Candidate pool ready: %d accounts", len(candidates))
     return candidates
 
 
