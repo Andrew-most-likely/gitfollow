@@ -54,10 +54,23 @@ jobs:
         run: |
           current_tag="${GITHUB_REF_NAME}"
           echo "Keeping: $current_tag"
+
+          # Pass 1: delete every GitHub Release except the current one.
+          # --cleanup-tag removes the associated git tag at the same time.
           gh release list --repo ${{ github.repository }} --limit 100 --json tagName \
             --jq '.[].tagName' | while read -r tag; do
             if [ "$tag" != "$current_tag" ]; then
               echo "Deleting release + tag: $tag"
               gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag 2>/dev/null || true
+            fi
+          done
+
+          # Pass 2: delete any remaining git tags that had no release attached.
+          gh api "repos/${{ github.repository }}/git/refs/tags" --paginate \
+            --jq '.[].ref' | while read -r ref; do
+            tag="${ref#refs/tags/}"
+            if [ "$tag" != "$current_tag" ]; then
+              echo "Deleting orphan tag: $tag"
+              gh api --method DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" 2>/dev/null || true
             fi
           done
