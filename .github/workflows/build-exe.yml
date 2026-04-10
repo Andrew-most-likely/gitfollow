@@ -45,3 +45,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/GitFollow.exe
+
+      - name: Clean up old releases and tags
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current_tag="${GITHUB_REF_NAME}"
+          echo "Keeping: $current_tag"
+          gh release list --repo ${{ github.repository }} --limit 100 --json tagName \
+            --jq '.[].tagName' | while read -r tag; do
+            if [ "$tag" != "$current_tag" ]; then
+              echo "Deleting release + tag: $tag"
+              gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag 2>/dev/null || true
+            fi
+          done
