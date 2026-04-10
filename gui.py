@@ -464,6 +464,10 @@ class App(tk.Tk):
               "First run is slow (one check per account). Results are cached."
               ).pack(side="left", padx=(6, 0))
 
+        self._btn_stop = ttk.Button(
+            btn_row, text="Stop", command=self._stop_run, state="disabled"
+        )
+        self._btn_stop.pack(side="left", padx=(0, 8))
         ttk.Button(btn_row, text="Clear Log", command=self._clear_log).pack(side="right")
 
         # Terminal
@@ -504,6 +508,7 @@ class App(tk.Tk):
         self._running = True
         self._btn_follow.config(state="disabled")
         self._btn_unfollow.config(state="disabled")
+        self._btn_stop.config(state="normal")
         self._set_status(f"Running {mode}...")
         self._log_write(f"\n{'=' * 60}\n  GitFollow - {mode.title()} Run - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'=' * 60}\n\n")
 
@@ -517,6 +522,8 @@ class App(tk.Tk):
             try:
                 import gitfollow as _gf
                 importlib.reload(_gf)
+                _gf.stop_event.clear()
+                self._gf_module = _gf
                 _gf.main()
             except Exception as e:
                 self._log_write(f"\nERROR: {e}\n")
@@ -526,10 +533,19 @@ class App(tk.Tk):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _stop_run(self):
+        gf = getattr(self, "_gf_module", None)
+        if gf:
+            gf.stop_event.set()
+        self._btn_stop.config(state="disabled")
+        self._set_status("Stop requested - finishing current operation...")
+        self._log_write("\n  Stop requested - will halt after current operation.\n")
+
     def _run_done(self):
         self._running = False
         self._btn_follow.config(state="normal")
         self._btn_unfollow.config(state="normal")
+        self._btn_stop.config(state="disabled")
         self._log_write(f"\n{'=' * 60}\n  Run complete - {datetime.now().strftime('%H:%M:%S')}\n{'=' * 60}\n")
         self._set_status("Run complete.")
         self._refresh_dashboard()

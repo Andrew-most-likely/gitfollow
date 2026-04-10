@@ -35,6 +35,7 @@ import json
 import time
 import random
 import logging
+import threading
 import requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -59,6 +60,10 @@ HEADERS = {
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+# Set by the GUI to request a graceful stop between operations.
+# Reset to a fresh Event on each run via importlib.reload.
+stop_event = threading.Event()
 
 # ── State helpers ─────────────────────────────────────────────────────────────
 
@@ -266,6 +271,9 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
 
     log.info("Searching for candidates (sort=%s order=%s) ...", sort, order)
     for page in range(1, pages_needed + 1):
+        if stop_event.is_set():
+            log.info("Stop requested - halting candidate search.")
+            break
         log.info("Fetching search page %d/%d ...", page, pages_needed)
         resp = api_get("https://api.github.com/search/users", {
             "q": query,
@@ -324,6 +332,9 @@ def do_follows(state: dict, my_following: set, my_followers: set):
     log.info("Checking quality of %d candidates ...", pool_size)
 
     for login in pool:
+        if stop_event.is_set():
+            log.info("Stop requested - halting follow pass.")
+            break
         if followed >= FOLLOW_LIMIT:
             break
         if checks_remaining() < 50:
@@ -375,6 +386,9 @@ def do_quality_unfollows(state: dict, my_following: set):
     cache_hits = 0
 
     for i, login in enumerate(candidates):
+        if stop_event.is_set():
+            log.info("Stop requested - halting quality unfollow pass.")
+            break
         # Re-check quota every 50 users instead of every user
         if i % 50 == 0:
             quota = checks_remaining()
