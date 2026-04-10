@@ -822,10 +822,17 @@ class App(tk.Tk):
         def _on_canvas_resize(e):
             canvas.itemconfig(_win_id, width=e.width)
 
+        def _on_enter(_e):
+            canvas.bind_all("<MouseWheel>",
+                            lambda e: canvas.yview_scroll(int(-1 * e.delta / 120), "units"))
+
+        def _on_leave(_e):
+            canvas.unbind_all("<MouseWheel>")
+
         content.bind("<Configure>", _on_content_resize)
         canvas.bind("<Configure>", _on_canvas_resize)
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(int(-1 * e.delta / 120), "units"))
+        canvas.bind("<Enter>", _on_enter)
+        canvas.bind("<Leave>", _on_leave)
 
         inner = tk.Frame(content, bg=C_BG)
         inner.pack(fill="x", padx=20, pady=20)
