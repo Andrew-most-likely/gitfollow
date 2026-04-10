@@ -22,7 +22,6 @@ GitFollow helps you discover and connect with active GitHub developers. It ident
 - **Quality cleanup** -optional weekly pass to unfollow existing follows that have gone inactive
 - **Quality cache** -remembers check results for 7 days to minimize API usage on repeat runs
 - **Desktop GUI** -setup wizard, live stats dashboard, and run controls -no terminal needed
-- **GitHub Actions** -runs on a schedule with zero infrastructure, free on public repos
 
 ---
 
@@ -42,26 +41,7 @@ GitFollow helps you discover and connect with active GitHub developers. It ident
 
 ---
 
-### Option 2 -Fork for automated scheduling (GitHub Actions)
-
-This runs everything on GitHub's servers automatically -no computer needs to stay on.
-
-1. [**Fork this repo**](https://github.com/Andrew-most-likely/gitfollow/fork)
-2. Go to your fork → **Settings → Secrets and variables → Actions**
-3. Add two repository secrets:
-
-| Secret | Value |
-|--------|-------|
-| `GH_TOKEN` | A GitHub personal access token with `user:follow` scope |
-| `GH_USERNAME` | Your GitHub username |
-
-4. Go to the **Actions** tab and enable workflows
-
-The **follow** workflow runs daily at 09:00 UTC. The **quality unfollow** workflow runs weekly on Sundays. Both can be triggered manually from the Actions tab at any time.
-
----
-
-### Option 3 -Run from source
+### Option 2 -Run from source
 
 ```bash
 git clone https://github.com/Andrew-most-likely/gitfollow
@@ -119,11 +99,9 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 
 | Workflow | Schedule | What it does |
 |----------|----------|-------------|
-| `run.yml` | Daily 09:00 UTC | Unfollow non-reciprocators + follow new candidates |
-| `unfollow.yml` | Weekly Sunday 10:00 UTC | Quality-unfollow pass against entire following list |
 | `build-exe.yml` | On tag push / manual | Builds `GitFollow.exe` and attaches to the release |
 
-All workflows can be triggered manually from **Actions → (workflow name) → Run workflow**.
+The workflow can be triggered manually from **Actions → Build Windows Exe → Run workflow**.
 
 ---
 
@@ -146,14 +124,16 @@ Or trigger the **Build Windows Exe** workflow from the Actions tab -the `.exe` i
 - Quality check cache (so accounts aren't re-evaluated every run)
 - Lifetime stats (total followed, unfollowed, mutual)
 
-The file is committed back to the repo after each Actions run so state persists across runs. It is excluded from `.gitignore` intentionally.
+The file is excluded from git (`.gitignore`) and never committed to the repo. State persists between runs via GitHub Actions cache.
 
 ---
 
 ## FAQ
 
-**Is this compliant with GitHub's Terms of Service?**
-GitFollow is designed with compliance in mind. It identifies itself to GitHub via a `User-Agent` header as required by the [GitHub API ToS](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service), respects all rate limits, uses polite delays between requests, and only connects with genuinely active real users. The default follow limit is set conservatively at 150/day. That said, any automated network activity carries some risk -use it responsibly and keep limits reasonable.
+**Does this comply with GitHub's Terms of Service?**
+Automated follow/unfollow is explicitly covered by GitHub's [Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) (Section 4 — spam and inauthentic activity) and the [Disrupting the Experience of Other Users](https://docs.github.com/en/site-policy/acceptable-use-policies/github-disrupting-the-experience-of-other-users) policy, which prohibits "starring and/or following accounts or repositories in large volume in a short period of time."
+
+GitFollow does respect all rate limits, identifies itself via a proper `User-Agent` header, and targets only real active developers — but the core follow/unfollow mechanic still falls under those policies. Use it at your own risk and keep limits conservative.
 
 **How long does the quality unfollow pass take on first run?**
 Roughly 2 minutes of sleep time per 1,000 accounts (evaluation is read-only, uses a short 0.1s delay). Results are cached so subsequent weekly runs are near-instant.
