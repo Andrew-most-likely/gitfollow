@@ -589,6 +589,16 @@ def main():
     for l in ghost_entries:
         del state["following"][l]
 
+    # 1b. Backfill anyone followed outside the app (no timestamp yet)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    backfilled = 0
+    for login in my_following:
+        if login not in state["following"]:
+            state["following"][login] = {"followed_at": now_iso, "mutual": False}
+            backfilled += 1
+    if backfilled:
+        log.info("Backfilled %d externally-followed accounts with current timestamp", backfilled)
+
     # 2. Unfollow non-reciprocators
     do_unfollows(state, my_followers)
 
