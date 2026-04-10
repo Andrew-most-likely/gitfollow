@@ -324,9 +324,9 @@ class App(tk.Tk):
             messagebox.showinfo("Already running", "A run is already in progress.")
             return
 
-        env = {**os.environ}
-        for k, v in load_env().items():
-            env[k] = v
+        # Build env fresh from saved settings each run — never carry over
+        # overrides from a previous run (e.g. FOLLOW_LIMIT=0 from unfollow mode)
+        env = load_env()
 
         if not env.get("GH_TOKEN") or not env.get("GH_USERNAME"):
             messagebox.showerror(
