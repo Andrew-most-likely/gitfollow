@@ -5,6 +5,9 @@
 [![Build](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml/badge.svg)](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/Andrew-most-likely/gitfollow)](https://github.com/Andrew-most-likely/gitfollow/releases/latest)
+
+![GitFollow GUI](https://raw.githubusercontent.com/Andrew-most-likely/gitfollow/master/assets/screenshot.png)
 
 GitFollow finds active GitHub users who are likely to follow you back and follows them automatically. It unfollows anyone who doesn't reciprocate after a configurable window, and can periodically clean up your existing follows -removing organizations, inactive accounts, and users with no followers.
 
