@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Andrew-most-likely/gitfollow)](https://github.com/Andrew-most-likely/gitfollow/releases/latest)
 
-![GitFollow GUI](https://raw.githubusercontent.com/Andrew-most-likely/gitfollow/master/assets/screenshot.png)
+<img width="958" height="665" alt="image" src="https://github.com/user-attachments/assets/22641d3c-2742-4133-ab60-8d10c1ba6225" />
 
 GitFollow helps you discover and connect with active GitHub developers. It identifies real, recently active users who are likely to engage with your work, follows them on your behalf, and cleans up connections that never became mutual. All API usage is rate-limited, politely delayed, and fully identified to GitHub via a proper User-Agent header in compliance with the [GitHub API Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
