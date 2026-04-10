@@ -3,8 +3,9 @@ GitFollow GUI - Desktop interface for GitFollow.
 Run: python gui.py   or double-click GitFollow.exe
 """
 
+import colorsys
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox
 import importlib
 import json
 import logging
@@ -25,33 +26,36 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "1.3"
+VERSION = "2.0"
 
-# ── Design tokens ─────────────────────────────────────────────────────────────
+# ── Apple-inspired design tokens ──────────────────────────────────────────────
 
-BG       = "#f6f8fa"
-SURFACE  = "#ffffff"
-BORDER   = "#d0d7de"
-HDR_BG   = "#24292f"
-HDR_TEXT = "#ffffff"
-PRIMARY  = "#0969da"
-SUCCESS  = "#1a7f37"
-DANGER   = "#cf222e"
-WARNING  = "#bf8700"
-TEXT     = "#1f2328"
-MUTED    = "#57606a"
-TERM_BG  = "#0d1117"
-TERM_FG  = "#e6edf3"
-TAG_BG   = "#ddf4ff"
-TAG_FG   = "#0550ae"
+C_BG        = "#F2F2F7"   # systemGroupedBackground
+C_SURFACE   = "#FFFFFF"   # systemBackground
+C_SIDEBAR   = "#1C1C1E"   # sidebar (dark)
+C_SIDEBAR_H = "#3A3A3C"   # sidebar hover
+C_SIDEBAR_S = "#2C2C2E"   # sidebar selected
+C_ACCENT    = "#007AFF"   # systemBlue
+C_SUCCESS   = "#34C759"   # systemGreen
+C_DANGER    = "#FF3B30"   # systemRed
+C_WARNING   = "#FF9500"   # systemOrange
+C_TEXT      = "#1C1C1E"   # primary label
+C_TEXT2     = "#48484A"   # secondary label
+C_MUTED     = "#8E8E93"   # tertiary label / placeholders
+C_SEP       = "#E5E5EA"   # separator
+C_TERM_BG   = "#000000"   # terminal background
+C_TERM_FG   = "#F2F2F7"   # terminal foreground
 
-F_UI   = ("Segoe UI", 10)
-F_BOLD = ("Segoe UI", 10, "bold")
-F_H1   = ("Segoe UI", 11, "bold")
-F_MONO = ("Consolas", 9)
-F_NUM  = ("Segoe UI", 22, "bold")
-F_SM   = ("Segoe UI", 9)
-F_XS   = ("Segoe UI", 8)
+F_APP   = ("Segoe UI", 12, "bold")
+F_H1    = ("Segoe UI", 17, "bold")
+F_H2    = ("Segoe UI", 12, "bold")
+F_UI    = ("Segoe UI", 10)
+F_BOLD  = ("Segoe UI", 10, "bold")
+F_SM    = ("Segoe UI", 9)
+F_XS    = ("Segoe UI", 8)
+F_NUM   = ("Segoe UI", 26, "bold")
+F_MONO  = ("Consolas", 9)
+F_NAV   = ("Segoe UI", 10)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,10 +89,94 @@ def load_state() -> dict:
         "stats": {"followed": 0, "unfollowed": 0, "mutual": 0},
     }
 
-# ── Tooltip ───────────────────────────────────────────────────────────────────
+
+def _darken(hex_color: str, amount: float) -> str:
+    """Return a darkened version of a hex color."""
+    hex_c = hex_color.lstrip("#")
+    r, g, b = (int(hex_c[i:i+2], 16) / 255 for i in (0, 2, 4))
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    r2, g2, b2 = colorsys.hsv_to_rgb(h, s, max(0.0, v - amount))
+    return "#{:02x}{:02x}{:02x}".format(int(r2 * 255), int(g2 * 255), int(b2 * 255))
+
+
+# ── Rounded button (Canvas-based) ─────────────────────────────────────────────
+
+class RoundedButton(tk.Canvas):
+    """Pill-shaped button drawn on a Canvas for rounded corners."""
+
+    def __init__(self, parent, text, command,
+                 width=130, height=34, radius=8,
+                 bg=C_ACCENT, fg="white", font=F_BOLD, **kwargs):
+        super().__init__(
+            parent, width=width, height=height,
+            bg=parent.cget("bg"), highlightthickness=0, **kwargs
+        )
+        self._text      = text
+        self._orig_cmd  = command
+        self._command   = command
+        self._orig_bg   = bg
+        self._bg        = bg
+        self._hover_bg  = _darken(bg, 0.12)
+        self._fg        = fg
+        self._radius    = radius
+        self._font      = font
+        self._w         = width
+        self._h         = height
+        self._disabled  = False
+        self._hovering  = False
+        self._draw()
+        self.bind("<Enter>",    self._on_enter)
+        self.bind("<Leave>",    self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    def _rounded_rect(self, color: str):
+        self.delete("all")
+        w, h, r = self._w, self._h, self._radius
+        c = color
+        self.create_arc(0,       0,       2*r, 2*r, start=90,  extent=90, fill=c, outline=c)
+        self.create_arc(w-2*r,   0,       w,   2*r, start=0,   extent=90, fill=c, outline=c)
+        self.create_arc(0,       h-2*r,   2*r, h,   start=180, extent=90, fill=c, outline=c)
+        self.create_arc(w-2*r,   h-2*r,   w,   h,   start=270, extent=90, fill=c, outline=c)
+        self.create_rectangle(r, 0,   w-r, h,   fill=c, outline=c)
+        self.create_rectangle(0, r,   w,   h-r, fill=c, outline=c)
+        self.create_text(w // 2, h // 2, text=self._text,
+                         fill=self._fg, font=self._font)
+
+    def _draw(self):
+        if self._disabled:
+            self._rounded_rect(C_MUTED)
+        elif self._hovering:
+            self._rounded_rect(self._hover_bg)
+        else:
+            self._rounded_rect(self._bg)
+
+    def _on_enter(self, _e=None):
+        if not self._disabled:
+            self._hovering = True
+            self.config(cursor="hand2")
+            self._draw()
+
+    def _on_leave(self, _e=None):
+        self._hovering = False
+        self.config(cursor="")
+        self._draw()
+
+    def _on_click(self, _e=None):
+        if self._command and not self._disabled:
+            self._command()
+
+    def config_state(self, disabled: bool):
+        self._disabled = disabled
+        self._hovering = False
+        self._command  = None if disabled else self._orig_cmd
+        self._bg       = C_MUTED if disabled else self._orig_bg
+        self._draw()
+
+
+# ── Tooltip ────────────────────────────────────────────────────────────────────
 
 class Tooltip:
-    """Hover tooltip attached to any widget."""
+    """Dark floating tooltip on hover."""
 
     def __init__(self, widget: tk.Widget, text: str):
         self._win  = None
@@ -101,16 +189,15 @@ class Tooltip:
         if self._win:
             return
         w = event.widget
-        x = w.winfo_rootx() + w.winfo_width() + 6
-        y = w.winfo_rooty() + (w.winfo_height() // 2) - 12
+        x = w.winfo_rootx() + w.winfo_width() + 8
+        y = w.winfo_rooty() + (w.winfo_height() // 2) - 14
         self._win = tw = tk.Toplevel(w)
         tw.wm_overrideredirect(True)
         tw.wm_attributes("-topmost", True)
         tw.wm_geometry(f"+{x}+{y}")
         tk.Label(
             tw, text=self._text, justify="left", wraplength=260,
-            bg="#fffbe6", fg=TEXT, relief="solid", bd=1,
-            font=F_SM, padx=10, pady=8,
+            bg="#1C1C1E", fg="white", font=F_SM, padx=12, pady=8,
         ).pack()
 
     def _hide(self, event=None):
@@ -119,18 +206,15 @@ class Tooltip:
             self._win = None
 
 
-def _help(parent: tk.Widget, tip: str) -> tk.Label:
-    """Small inline ? button with a hover tooltip."""
-    lbl = tk.Label(
-        parent, text=" ? ", font=F_XS,
-        fg=PRIMARY, bg=BG, cursor="question_arrow",
-        relief="solid", bd=1,
-    )
-    Tooltip(lbl, tip)
+def _tip(parent, text: str, bg=C_BG) -> tk.Label:
+    """Small inline ? label with a hover tooltip."""
+    lbl = tk.Label(parent, text="?", font=("Segoe UI", 8, "bold"),
+                   fg=C_MUTED, bg=bg, cursor="question_arrow", width=2)
+    Tooltip(lbl, text)
     return lbl
 
 
-# ── Log handler ───────────────────────────────────────────────────────────────
+# ── Log handler ────────────────────────────────────────────────────────────────
 
 class _GUILogHandler(logging.Handler):
     def __init__(self, callback):
@@ -143,118 +227,215 @@ class _GUILogHandler(logging.Handler):
         except Exception:
             pass
 
-# ── App ───────────────────────────────────────────────────────────────────────
+
+# ── App ────────────────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GitFollow")
-        self.geometry("800x600")
+        self.geometry("960x640")
         self.resizable(False, False)
-        self.configure(bg=BG)
-        self._running = False
+        self.configure(bg=C_SIDEBAR)
+        self._running       = False
+        self._pages         = {}
+        self._nav_frames    = {}
+        self._current_page  = None
         self._build_ui()
         self.after(100, self._on_open)
 
-    # ── Styles and skeleton ───────────────────────────────────────────────────
+    # ── Shell ──────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        s = ttk.Style(self)
-        s.theme_use("clam")
-        s.configure("TFrame",            background=BG)
-        s.configure("TLabel",            background=BG, foreground=TEXT, font=F_UI)
-        s.configure("TButton",           font=F_UI, padding=[10, 5])
-        s.configure("TCheckbutton",      background=BG, foreground=TEXT, font=F_UI)
-        s.configure("TSeparator",        background=BORDER)
-        s.configure("TNotebook",         background=BG, borderwidth=0, tabmargins=[0, 4, 0, 0])
-        s.configure("TNotebook.Tab",     font=F_UI, padding=[18, 8], background="#e8ecf0", foreground=MUTED)
-        s.map("TNotebook.Tab",
-              background=[("selected", SURFACE), ("active", "#f0f4f8")],
-              foreground=[("selected", TEXT),    ("active", TEXT)])
-        s.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT, bordercolor=BORDER, font=F_UI)
-        s.configure("Primary.TButton",   font=F_BOLD, background=PRIMARY, foreground="white")
-        s.map("Primary.TButton",
-              background=[("active", "#0757bb"), ("disabled", "#8ab4e8")])
+        # Left sidebar
+        self._sidebar = tk.Frame(self, bg=C_SIDEBAR, width=190)
+        self._sidebar.pack(side="left", fill="y")
+        self._sidebar.pack_propagate(False)
 
-        # Header
-        hdr = tk.Frame(self, bg=HDR_BG, height=52)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        tk.Label(hdr, text="GitFollow", bg=HDR_BG, fg=HDR_TEXT,
-                 font=("Segoe UI", 15, "bold")).pack(side="left", padx=16, pady=12)
-        tk.Label(hdr, text=f"v{VERSION}", bg=HDR_BG, fg="#8b949e",
-                 font=F_SM).pack(side="left", pady=16)
-        tk.Label(hdr, text="Automated GitHub network growth",
-                 bg=HDR_BG, fg="#8b949e", font=F_SM).pack(side="right", padx=16, pady=16)
+        # Right content pane
+        self._pane = tk.Frame(self, bg=C_BG)
+        self._pane.pack(side="left", fill="both", expand=True)
 
-        # Notebook
-        self.nb = ttk.Notebook(self)
-        self.nb.pack(fill="both", expand=True, padx=0, pady=0)
+        self._build_sidebar()
+        self._build_setup_page()
+        self._build_dashboard_page()
+        self._build_run_page()
+        self._build_settings_page()
 
-        self._build_setup_tab()
-        self._build_dashboard_tab()
-        self._build_run_tab()
-        self._build_settings_tab()
-
-        # Status bar
-        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
-        bar = tk.Frame(self, bg="#f0f2f4", height=28)
-        bar.pack(fill="x")
+        # Status bar (pinned to bottom of pane)
+        tk.Frame(self._pane, bg=C_SEP, height=1).pack(side="bottom", fill="x")
+        bar = tk.Frame(self._pane, bg=C_SURFACE, height=30)
+        bar.pack(side="bottom", fill="x")
         bar.pack_propagate(False)
         self._status_var = tk.StringVar(value="Ready")
-        tk.Label(bar, textvariable=self._status_var, bg="#f0f2f4",
-                 fg=MUTED, font=F_SM).pack(side="left", padx=12, pady=5)
-        tk.Label(bar, text="MIT License", bg="#f0f2f4",
-                 fg=MUTED, font=F_SM).pack(side="right", padx=12, pady=5)
+        tk.Label(bar, textvariable=self._status_var,
+                 bg=C_SURFACE, fg=C_MUTED, font=F_SM).pack(side="left", padx=16, pady=6)
 
-    # ── Setup tab ─────────────────────────────────────────────────────────────
+        self._show_page("setup")
 
-    def _build_setup_tab(self):
-        outer = ttk.Frame(self.nb)
-        self.nb.add(outer, text="  Setup  ")
+    # ── Sidebar ────────────────────────────────────────────────────────────────
 
-        f = tk.Frame(outer, bg=SURFACE, bd=1, relief="solid")
-        f.pack(fill="both", expand=True, padx=16, pady=16)
+    def _build_sidebar(self):
+        # App branding
+        brand = tk.Frame(self._sidebar, bg=C_SIDEBAR, height=60)
+        brand.pack(fill="x")
+        brand.pack_propagate(False)
+        tk.Label(brand, text="GitFollow", bg=C_SIDEBAR, fg="white",
+                 font=F_APP).pack(side="left", padx=18, pady=18)
+        tk.Label(brand, text=f"v{VERSION}", bg=C_SIDEBAR, fg=C_MUTED,
+                 font=F_XS).pack(side="left", pady=22)
 
-        tk.Label(f, text="Environment Checks", font=F_H1, bg=SURFACE, fg=TEXT).pack(
-            anchor="w", padx=20, pady=(16, 4))
-        tk.Label(f, text="Verify that everything is configured correctly before running.",
-                 font=F_SM, bg=SURFACE, fg=MUTED).pack(anchor="w", padx=20, pady=(0, 12))
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=20)
+        tk.Frame(self._sidebar, bg="#3A3A3C", height=1).pack(fill="x")
+
+        tk.Label(self._sidebar, text="MENU", bg=C_SIDEBAR, fg="#636366",
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(12, 2))
+
+        for key, icon, label in [
+            ("setup",     "checkmark.circle", "Setup"),
+            ("dashboard", "chart.bar",        "Dashboard"),
+            ("run",       "play.circle",      "Run"),
+            ("settings",  "gearshape",        "Settings"),
+        ]:
+            self._nav_item(key, label)
+
+        # Spacer + license note
+        tk.Frame(self._sidebar, bg=C_SIDEBAR).pack(fill="both", expand=True)
+        tk.Label(self._sidebar, text="MIT License",
+                 bg=C_SIDEBAR, fg="#636366", font=F_XS).pack(side="bottom", pady=14)
+
+    def _nav_item(self, key: str, label: str):
+        frame = tk.Frame(self._sidebar, bg=C_SIDEBAR, cursor="hand2")
+        frame.pack(fill="x", padx=8, pady=1)
+
+        # Accent bar (shown when selected)
+        bar   = tk.Frame(frame, bg=C_SIDEBAR, width=3)
+        bar.pack(side="left", fill="y")
+
+        inner = tk.Label(frame, text=f"  {label}", bg=C_SIDEBAR, fg=C_MUTED,
+                         font=F_NAV, anchor="w", padx=10, pady=8)
+        inner.pack(fill="x", side="left", expand=True)
+
+        def click(_e=None, k=key):
+            self._show_page(k)
+
+        def enter(_e=None):
+            if self._current_page != key:
+                frame.config(bg=C_SIDEBAR_H)
+                inner.config(bg=C_SIDEBAR_H)
+                bar.config(bg=C_SIDEBAR_H)
+
+        def leave(_e=None):
+            if self._current_page != key:
+                frame.config(bg=C_SIDEBAR)
+                inner.config(bg=C_SIDEBAR)
+                bar.config(bg=C_SIDEBAR)
+
+        for w in (frame, inner, bar):
+            w.bind("<Button-1>", click)
+            w.bind("<Enter>",    enter)
+            w.bind("<Leave>",    leave)
+
+        self._nav_frames[key] = (frame, inner, bar)
+
+    def _show_page(self, name: str):
+        self._current_page = name
+        for pg in self._pages.values():
+            pg.pack_forget()
+        self._pages[name].pack(fill="both", expand=True)
+
+        for key, (frame, inner, bar) in self._nav_frames.items():
+            if key == name:
+                frame.config(bg=C_SIDEBAR_S)
+                inner.config(bg=C_SIDEBAR_S, fg="white",
+                             font=("Segoe UI", 10, "bold"))
+                bar.config(bg=C_ACCENT)
+            else:
+                frame.config(bg=C_SIDEBAR)
+                inner.config(bg=C_SIDEBAR, fg=C_MUTED, font=F_NAV)
+                bar.config(bg=C_SIDEBAR)
+
+    # ── Page scaffold ──────────────────────────────────────────────────────────
+
+    def _page_header(self, page: tk.Frame, title: str, subtitle: str = "") -> tk.Frame:
+        """White header bar. Returns the right-side actions frame."""
+        hdr = tk.Frame(page, bg=C_SURFACE)
+        hdr.pack(fill="x")
+
+        left = tk.Frame(hdr, bg=C_SURFACE)
+        left.pack(side="left", fill="y")
+        tk.Label(left, text=title, bg=C_SURFACE, fg=C_TEXT,
+                 font=F_H1).pack(anchor="w", padx=24, pady=(18, 0))
+        if subtitle:
+            tk.Label(left, text=subtitle, bg=C_SURFACE, fg=C_MUTED,
+                     font=F_SM).pack(anchor="w", padx=24, pady=(1, 16))
+        else:
+            tk.Frame(left, height=18, bg=C_SURFACE).pack()
+
+        right = tk.Frame(hdr, bg=C_SURFACE)
+        right.pack(side="right", fill="y", padx=22, pady=18)
+
+        tk.Frame(page, bg=C_SEP, height=1).pack(fill="x")
+        return right
+
+    def _card(self, parent, **pack_kw) -> tk.Frame:
+        """White surface card with no border."""
+        card = tk.Frame(parent, bg=C_SURFACE)
+        card.pack(**pack_kw)
+        return card
+
+    # ── Setup page ─────────────────────────────────────────────────────────────
+
+    def _build_setup_page(self):
+        page = tk.Frame(self._pane, bg=C_BG)
+        self._pages["setup"] = page
+        self._page_header(page, "Setup", "Verify your environment before running.")
+
+        content = tk.Frame(page, bg=C_BG)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+
+        card = self._card(content, fill="x")
 
         checks = [
-            ("python",   "Python 3.8+",                    "GitFollow requires Python 3.8 or newer."),
-            ("requests", "requests library installed",      "The requests library handles all GitHub API calls. Run 'pip install requests' if missing."),
-            ("token",    "GH_TOKEN configured",             "Your GitHub Personal Access Token. Set it in the Settings tab and click Save."),
-            ("username", "GH_USERNAME configured",          "Your GitHub username. Set it in the Settings tab and click Save."),
-            ("data_dir", "data/ directory exists",          "Stores state.json which tracks follows, unfollow history, and cached quality checks."),
+            ("python",   "Python 3.8+",
+             "GitFollow requires Python 3.8 or newer."),
+            ("requests", "requests library installed",
+             "Handles all GitHub API calls. Run 'pip install requests' if missing."),
+            ("token",    "GH_TOKEN configured",
+             "Your GitHub Personal Access Token. Set it in the Settings tab."),
+            ("username", "GH_USERNAME configured",
+             "Your GitHub username. Set it in the Settings tab."),
+            ("data_dir", "data/ directory exists",
+             "Stores state.json which tracks follows and quality check results."),
         ]
         self._check_icons = {}
-        chk_frame = tk.Frame(f, bg=SURFACE)
-        chk_frame.pack(fill="x", padx=20, pady=12)
-        for key, label, tip in checks:
-            row = tk.Frame(chk_frame, bg=SURFACE)
-            row.pack(fill="x", pady=4)
-            icon = tk.Label(row, text="  ", font=("Segoe UI", 11), bg=SURFACE, width=3)
-            icon.pack(side="left")
-            tk.Label(row, text=label, font=F_UI, bg=SURFACE, fg=TEXT).pack(side="left")
-            _help(row, tip).pack(side="left", padx=(8, 0))
-            self._check_icons[key] = icon
+        for key, label, tooltip in checks:
+            row = tk.Frame(card, bg=C_SURFACE)
+            row.pack(fill="x", padx=20, pady=5)
+            dot = tk.Label(row, text="●", font=("Segoe UI", 13),
+                           bg=C_SURFACE, fg=C_MUTED, width=2)
+            dot.pack(side="left")
+            tk.Label(row, text=label, font=F_UI,
+                     bg=C_SURFACE, fg=C_TEXT).pack(side="left", padx=(4, 0))
+            _tip(row, tooltip, bg=C_SURFACE).pack(side="left", padx=(8, 0))
+            self._check_icons[key] = dot
 
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=20)
+        tk.Frame(card, bg=C_SEP, height=1).pack(fill="x", padx=20, pady=(8, 0))
 
-        btn_row = tk.Frame(f, bg=SURFACE)
+        btn_row = tk.Frame(card, bg=C_SURFACE)
         btn_row.pack(fill="x", padx=20, pady=14)
-        ttk.Button(btn_row, text="Re-check",  command=self._run_checks).pack(side="left", padx=(0, 8))
-        ttk.Button(btn_row, text="Auto-fix",  command=self._autofix).pack(side="left", padx=(0, 8))
-        ttk.Button(btn_row, text="Create GitHub Token",
-                   command=lambda: webbrowser.open(
-                       "https://github.com/settings/tokens/new"
-                       "?scopes=user%3Afollow&description=GitFollow"
-                   )).pack(side="left")
+        RoundedButton(btn_row, "Re-check", self._run_checks,
+                      width=100, height=32).pack(side="left", padx=(0, 8))
+        RoundedButton(btn_row, "Auto-fix", self._autofix,
+                      width=100, height=32, bg=C_SUCCESS).pack(side="left", padx=(0, 8))
+        RoundedButton(btn_row, "Create Token",
+                      lambda: webbrowser.open(
+                          "https://github.com/settings/tokens/new"
+                          "?scopes=user%3Afollow&description=GitFollow"
+                      ),
+                      width=120, height=32, bg=C_TEXT2).pack(side="left")
 
-        self._setup_msg = tk.Label(f, text="", font=F_SM, bg=SURFACE)
-        self._setup_msg.pack(anchor="w", padx=20, pady=(0, 16))
+        self._setup_msg = tk.Label(card, text="", font=F_SM, bg=C_SURFACE)
+        self._setup_msg.pack(anchor="w", padx=20, pady=(0, 14))
 
     def _run_checks(self):
         self._set_status("Running checks...")
@@ -271,17 +452,13 @@ class App(tk.Tk):
         results["data_dir"] = (BASE_DIR / "data").exists()
 
         for key, ok in results.items():
-            self._check_icons[key].config(
-                text=" ok" if ok else " --",
-                fg=SUCCESS if ok else DANGER,
-                font=F_SM,
-            )
+            self._check_icons[key].config(fg=C_SUCCESS if ok else C_DANGER)
 
         all_ok = all(results.values())
         self._setup_msg.config(
             text="All checks passed. You are ready to run." if all_ok
                  else "Fix the failing items above, then click Re-check.",
-            fg=SUCCESS if all_ok else DANGER,
+            fg=C_SUCCESS if all_ok else C_DANGER,
         )
         self._set_status("Checks complete." if all_ok else "Some checks failed.")
 
@@ -303,86 +480,93 @@ class App(tk.Tk):
             fixed.append("Created data/ directory")
         if not ENV_FILE.exists():
             ENV_FILE.write_text("GH_TOKEN=\nGH_USERNAME=\n", encoding="utf-8")
-            fixed.append("Created .env - open Settings tab to fill it in")
+            fixed.append("Created .env - open Settings to fill in credentials")
         messagebox.showinfo(
             "Auto-fix",
             ("Fixed:\n  " + "\n  ".join(fixed)) if fixed else "Nothing needed fixing.",
         )
         self._run_checks()
 
-    # ── Dashboard tab ─────────────────────────────────────────────────────────
+    # ── Dashboard page ─────────────────────────────────────────────────────────
 
-    def _build_dashboard_tab(self):
-        outer = ttk.Frame(self.nb)
-        self.nb.add(outer, text="  Dashboard  ")
+    def _build_dashboard_page(self):
+        page = tk.Frame(self._pane, bg=C_BG)
+        self._pages["dashboard"] = page
+        hdr_right = self._page_header(page, "Dashboard", "Live statistics.")
 
-        header = tk.Frame(outer, bg=BG)
-        header.pack(fill="x", padx=16, pady=(16, 0))
-        tk.Label(header, text="Live Stats", font=F_H1, bg=BG, fg=TEXT).pack(side="left")
-        ttk.Button(header, text="Refresh", command=self._refresh_dashboard).pack(side="right")
-        self._dash_ts = tk.Label(header, text="", font=F_SM, bg=BG, fg=MUTED)
-        self._dash_ts.pack(side="right", padx=(0, 10))
+        self._dash_ts = tk.Label(hdr_right, text="", font=F_SM,
+                                 bg=C_SURFACE, fg=C_MUTED)
+        self._dash_ts.pack(side="right", padx=(0, 12), anchor="center")
+        RoundedButton(hdr_right, "Refresh", self._refresh_dashboard,
+                      width=90, height=30, font=F_SM).pack(side="right")
 
-        grid_frame = tk.Frame(outer, bg=BG)
-        grid_frame.pack(fill="x", padx=16, pady=12)
+        content = tk.Frame(page, bg=C_BG)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
 
-        cards = [
-            ("following",  "Following",       "Your current total following count on GitHub."),
-            ("followers",  "Followers",        "Your current total follower count on GitHub."),
-            ("mutual",     "Mutual Follows",   "Accounts tracked by GitFollow that also follow you back."),
-            ("followed",   "Total Followed",   "Total accounts followed through GitFollow across all runs."),
-            ("unfollowed", "Total Unfollowed", "Total accounts unfollowed through GitFollow across all runs."),
-            ("cached",     "Cached Checks",    "Quality check results stored locally. Avoids re-checking accounts on every run."),
+        grid = tk.Frame(content, bg=C_BG)
+        grid.pack(fill="x")
+
+        card_defs = [
+            ("following",  "FOLLOWING",       "Your current total following count on GitHub."),
+            ("followers",  "FOLLOWERS",        "Your current total follower count on GitHub."),
+            ("mutual",     "MUTUAL FOLLOWS",   "Accounts tracked by GitFollow that also follow you back."),
+            ("followed",   "TOTAL FOLLOWED",   "Total accounts followed through GitFollow across all runs."),
+            ("unfollowed", "TOTAL UNFOLLOWED", "Total accounts unfollowed through GitFollow across all runs."),
+            ("cached",     "CACHED CHECKS",    "Quality check results stored locally to avoid re-checking."),
         ]
         self._stat_vars = {}
-        for i, (key, label, tip) in enumerate(cards):
+        for i, (key, label, tooltip) in enumerate(card_defs):
             col = i % 3
             row = i // 3
+            card = tk.Frame(grid, bg=C_SURFACE, padx=20, pady=16)
+            card.grid(row=row, column=col,
+                      padx=(0 if col == 0 else 10, 0),
+                      pady=(0 if row == 0 else 10, 0),
+                      sticky="nsew")
 
-            card = tk.Frame(grid_frame, bg=SURFACE, bd=1, relief="solid",
-                            padx=20, pady=14)
-            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            top_row = tk.Frame(card, bg=C_SURFACE)
+            top_row.pack(fill="x")
+            tk.Label(top_row, text=label, font=("Segoe UI", 8),
+                     bg=C_SURFACE, fg=C_MUTED).pack(side="left")
+            _tip(top_row, tooltip, bg=C_SURFACE).pack(side="right")
 
-            top = tk.Frame(card, bg=SURFACE)
-            top.pack(fill="x")
-            tk.Label(top, text=label, font=F_XS, bg=SURFACE, fg=MUTED).pack(side="left")
-            _help(top, tip).pack(side="right")
-
-            var = tk.StringVar(value="...")
+            var = tk.StringVar(value="--")
             self._stat_vars[key] = var
-            tk.Label(card, textvariable=var, font=F_NUM, bg=SURFACE, fg=TEXT).pack(anchor="w", pady=(4, 0))
+            tk.Label(card, textvariable=var, font=F_NUM,
+                     bg=C_SURFACE, fg=C_TEXT).pack(anchor="w", pady=(8, 0))
 
         for col in range(3):
-            grid_frame.columnconfigure(col, weight=1)
+            grid.columnconfigure(col, weight=1)
 
-        note = tk.Label(outer,
-            text="Following and Followers are fetched live from the GitHub API. Other stats are read from local state.json.",
-            font=F_XS, bg=BG, fg=MUTED, wraplength=720, justify="left")
-        note.pack(anchor="w", padx=22, pady=(4, 0))
+        tk.Label(content,
+            text="Following / Followers fetched live from the GitHub API. "
+                 "Other stats read from local state.json.",
+            font=F_XS, bg=C_BG, fg=C_MUTED,
+            wraplength=700, justify="left",
+        ).pack(anchor="w", pady=(14, 0))
 
     def _refresh_dashboard(self):
         state = load_state()
         stats = state.get("stats", {})
         cache = state.get("quality_cache", {})
-
         self._stat_vars["mutual"].set(f"{stats.get('mutual', 0):,}")
         self._stat_vars["followed"].set(f"{stats.get('followed', 0):,}")
         self._stat_vars["unfollowed"].set(f"{stats.get('unfollowed', 0):,}")
         self._stat_vars["cached"].set(f"{len(cache):,}")
         self._stat_vars["following"].set("...")
         self._stat_vars["followers"].set("...")
-        self._dash_ts.config(text="Fetching live counts...")
+        self._dash_ts.config(text="Fetching...")
         self._set_status("Fetching live counts from GitHub...")
 
         def _fetch():
-            env    = {**load_env(), **os.environ}
-            token  = env.get("GH_TOKEN", "").strip()
-            user   = env.get("GH_USERNAME", "").strip()
+            env   = {**load_env(), **os.environ}
+            token = env.get("GH_TOKEN", "").strip()
+            user  = env.get("GH_USERNAME", "").strip()
             if not token or not user:
                 self.after(0, lambda: (
                     self._stat_vars["following"].set("--"),
                     self._stat_vars["followers"].set("--"),
-                    self._dash_ts.config(text="Set credentials in Settings to load live counts."),
+                    self._dash_ts.config(text="Set credentials in Settings"),
                     self._set_status("Credentials not configured."),
                 ))
                 return
@@ -395,7 +579,7 @@ class App(tk.Tk):
                     timeout=10,
                 )
                 if resp.status_code == 200:
-                    data = resp.json()
+                    data  = resp.json()
                     f_ing = data.get("following", 0)
                     f_ers = data.get("followers", 0)
                     ts    = datetime.now().strftime("%H:%M:%S")
@@ -414,74 +598,75 @@ class App(tk.Tk):
                     ))
             except Exception as e:
                 self.after(0, lambda: (
-                    self._dash_ts.config(text="Network error."),
+                    self._dash_ts.config(text="Network error"),
                     self._set_status(f"Error: {e}"),
                 ))
 
         threading.Thread(target=_fetch, daemon=True).start()
 
-    # ── Run tab ───────────────────────────────────────────────────────────────
+    # ── Run page ───────────────────────────────────────────────────────────────
 
-    def _build_run_tab(self):
-        outer = ttk.Frame(self.nb)
-        self.nb.add(outer, text="  Run  ")
+    def _build_run_page(self):
+        page = tk.Frame(self._pane, bg=C_BG)
+        self._pages["run"] = page
+        self._page_header(page, "Run", "Execute follow or unfollow passes locally.")
 
-        top = tk.Frame(outer, bg=BG)
-        top.pack(fill="x", padx=16, pady=(16, 0))
+        content = tk.Frame(page, bg=C_BG)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
 
-        tk.Label(top, text="Actions", font=F_H1, bg=BG, fg=TEXT).pack(anchor="w")
-        tk.Label(top,
-            text="Runs execute locally on your machine. To run on a schedule, use GitHub Actions.",
-            font=F_SM, bg=BG, fg=MUTED).pack(anchor="w", pady=(2, 12))
+        # Action buttons card
+        card = self._card(content, fill="x", pady=(0, 12))
+        btn_area = tk.Frame(card, bg=C_SURFACE, padx=20, pady=16)
+        btn_area.pack(fill="x")
 
-        btn_row = tk.Frame(outer, bg=BG)
-        btn_row.pack(fill="x", padx=16, pady=(0, 8))
-
-        follow_frame = tk.Frame(btn_row, bg=BG)
-        follow_frame.pack(side="left", padx=(0, 8))
-        self._btn_follow = ttk.Button(
-            follow_frame, text="Run Follow", style="Primary.TButton",
-            command=lambda: self._start_run("follow"),
+        self._btn_follow = RoundedButton(
+            btn_area, "Run Follow", lambda: self._start_run("follow"),
+            width=130, height=36,
         )
-        self._btn_follow.pack(side="left")
-        _help(follow_frame,
-              "Searches GitHub for active users meeting your quality criteria "
-              "and follows up to FOLLOW_LIMIT of them. Skips orgs, inactive accounts, "
-              "and users with no followers."
-              ).pack(side="left", padx=(6, 0))
+        self._btn_follow.pack(side="left", padx=(0, 10))
+        Tooltip(self._btn_follow,
+                "Searches GitHub for active developers meeting your quality criteria "
+                "and follows up to FOLLOW_LIMIT of them.")
 
-        unfollow_frame = tk.Frame(btn_row, bg=BG)
-        unfollow_frame.pack(side="left", padx=(0, 8))
-        self._btn_unfollow = ttk.Button(
-            unfollow_frame, text="Run Unfollow",
-            command=lambda: self._start_run("unfollow"),
+        self._btn_unfollow = RoundedButton(
+            btn_area, "Run Unfollow", lambda: self._start_run("unfollow"),
+            width=130, height=36, bg=C_TEXT2,
         )
-        self._btn_unfollow.pack(side="left")
-        _help(unfollow_frame,
-              "Scans your entire following list and unfollows accounts that fail "
-              "quality criteria: organizations, users with no followers, and users "
-              "who have not pushed a commit in ACTIVITY_DAYS days. "
-              "First run is slow (one check per account). Results are cached."
-              ).pack(side="left", padx=(6, 0))
+        self._btn_unfollow.pack(side="left", padx=(0, 10))
+        Tooltip(self._btn_unfollow,
+                "Scans your following list and unfollows accounts that fail "
+                "quality criteria. First run is slow; subsequent runs use the cache.")
 
-        self._btn_stop = ttk.Button(
-            btn_row, text="Stop", command=self._stop_run, state="disabled"
+        self._btn_stop = RoundedButton(
+            btn_area, "Stop", self._stop_run,
+            width=80, height=36, bg=C_DANGER,
         )
-        self._btn_stop.pack(side="left", padx=(0, 8))
-        ttk.Button(btn_row, text="Clear Log", command=self._clear_log).pack(side="right")
+        self._btn_stop.pack(side="left")
+        self._btn_stop.config_state(disabled=True)
 
-        # Terminal
-        term_frame = tk.Frame(outer, bg=TERM_BG, bd=1, relief="solid")
-        term_frame.pack(fill="both", expand=True, padx=16, pady=(4, 16))
+        clear_lbl = tk.Label(btn_area, text="Clear Log", font=F_SM,
+                             fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
+        clear_lbl.pack(side="right")
+        clear_lbl.bind("<Button-1>", lambda _e: self._clear_log())
 
-        term_header = tk.Frame(term_frame, bg="#161b22")
-        term_header.pack(fill="x")
-        tk.Label(term_header, text="Output", font=F_XS,
-                 bg="#161b22", fg="#8b949e").pack(side="left", padx=10, pady=4)
+        # Terminal card
+        term = tk.Frame(content, bg=C_TERM_BG)
+        term.pack(fill="both", expand=True)
+
+        # macOS-style terminal chrome
+        chrome = tk.Frame(term, bg="#1A1A1A")
+        chrome.pack(fill="x")
+        dot_row = tk.Frame(chrome, bg="#1A1A1A")
+        dot_row.pack(side="left", padx=14, pady=9)
+        for dot_color in ("#FF5F56", "#FFBD2E", "#27C93F"):
+            tk.Label(dot_row, text="●", fg=dot_color, bg="#1A1A1A",
+                     font=("Segoe UI", 9)).pack(side="left", padx=2)
+        tk.Label(chrome, text="Output", font=("Segoe UI", 9),
+                 bg="#1A1A1A", fg="#636366").pack(pady=9)
 
         self._log = scrolledtext.ScrolledText(
-            term_frame, font=F_MONO, state="disabled",
-            bg=TERM_BG, fg=TERM_FG, insertbackground=TERM_FG,
+            term, font=F_MONO, state="disabled",
+            bg=C_TERM_BG, fg=C_TERM_FG, insertbackground=C_TERM_FG,
             relief="flat", borderwidth=0, selectbackground="#264f78",
         )
         self._log.pack(fill="both", expand=True, padx=4, pady=(0, 4))
@@ -490,7 +675,6 @@ class App(tk.Tk):
         if self._running:
             messagebox.showinfo("Already running", "A run is already in progress.")
             return
-
         env = load_env()
         merged = {**env, **os.environ}
         if not merged.get("GH_TOKEN") or not merged.get("GH_USERNAME"):
@@ -499,19 +683,21 @@ class App(tk.Tk):
                 "GH_TOKEN and GH_USERNAME must be set.\nGo to the Settings tab.",
             )
             return
-
         if mode == "unfollow":
             env["QUALITY_UNFOLLOW"] = "true"
             env["FOLLOW_LIMIT"]     = "0"
-
         os.environ.update(env)
         self._running = True
-        self._btn_follow.config(state="disabled")
-        self._btn_unfollow.config(state="disabled")
-        self._btn_stop.config(state="normal")
+        self._btn_follow.config_state(disabled=True)
+        self._btn_unfollow.config_state(disabled=True)
+        self._btn_stop.config_state(disabled=False)
         self._set_status(f"Running {mode}...")
-        self._log_write(f"\n{'=' * 60}\n  GitFollow - {mode.title()} Run - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'=' * 60}\n\n")
-
+        self._log_write(
+            f"\n{'=' * 60}\n"
+            f"  GitFollow  -  {mode.title()} Run  -  "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"{'=' * 60}\n\n"
+        )
         handler = _GUILogHandler(self._log_write)
         handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s"))
 
@@ -537,16 +723,20 @@ class App(tk.Tk):
         gf = getattr(self, "_gf_module", None)
         if gf:
             gf.stop_event.set()
-        self._btn_stop.config(state="disabled")
+        self._btn_stop.config_state(disabled=True)
         self._set_status("Stop requested - finishing current operation...")
         self._log_write("\n  Stop requested - will halt after current operation.\n")
 
     def _run_done(self):
         self._running = False
-        self._btn_follow.config(state="normal")
-        self._btn_unfollow.config(state="normal")
-        self._btn_stop.config(state="disabled")
-        self._log_write(f"\n{'=' * 60}\n  Run complete - {datetime.now().strftime('%H:%M:%S')}\n{'=' * 60}\n")
+        self._btn_follow.config_state(disabled=False)
+        self._btn_unfollow.config_state(disabled=False)
+        self._btn_stop.config_state(disabled=True)
+        self._log_write(
+            f"\n{'=' * 60}\n"
+            f"  Run complete  -  {datetime.now().strftime('%H:%M:%S')}\n"
+            f"{'=' * 60}\n"
+        )
         self._set_status("Run complete.")
         self._refresh_dashboard()
 
@@ -563,95 +753,137 @@ class App(tk.Tk):
         self._log.delete("1.0", tk.END)
         self._log.config(state="disabled")
 
-    # ── Settings tab ──────────────────────────────────────────────────────────
+    # ── Settings page ──────────────────────────────────────────────────────────
 
-    def _build_settings_tab(self):
-        outer = ttk.Frame(self.nb)
-        self.nb.add(outer, text="  Settings  ")
+    def _build_settings_page(self):
+        page = tk.Frame(self._pane, bg=C_BG)
+        self._pages["settings"] = page
+        self._page_header(page, "Settings",
+                          "Saved to a local .env file - never committed to git.")
 
-        f = tk.Frame(outer, bg=SURFACE, bd=1, relief="solid")
-        f.pack(fill="both", expand=True, padx=16, pady=16)
+        # Scrollable container
+        content = tk.Frame(page, bg=C_BG)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
 
-        tk.Label(f, text="Configuration", font=F_H1, bg=SURFACE, fg=TEXT).pack(
-            anchor="w", padx=20, pady=(16, 4))
-        tk.Label(f, text="Settings are saved to a local .env file and never committed to git.",
-                 font=F_SM, bg=SURFACE, fg=MUTED).pack(anchor="w", padx=20, pady=(0, 12))
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=20)
+        card = self._card(content, fill="x")
+        form = tk.Frame(card, bg=C_SURFACE)
+        form.pack(fill="x", padx=24, pady=16)
 
-        form = tk.Frame(f, bg=SURFACE)
-        form.pack(fill="x", padx=20, pady=12)
-
-        fields = [
-            ("GH_TOKEN",       "GitHub Token",         True,  "",
-             "Your GitHub Personal Access Token. Only the user:follow scope is required. "
-             "This is stored locally in .env and never shared."),
-            ("GH_USERNAME",    "GitHub Username",       False, "",
+        # Fields: (env_key, label, secret, default, tip)  or  (None, "SECTION", ...)
+        FIELDS = [
+            (None, "AUTHENTICATION", None, None, None),
+            ("GH_TOKEN",    "GitHub Token",    True,  "",
+             "Personal Access Token with user:follow scope. "
+             "Stored locally in .env, never shared."),
+            ("GH_USERNAME", "GitHub Username", False, "",
              "Your exact GitHub username (case-insensitive)."),
-            ("FOLLOW_LIMIT",   "Follow Limit",          False, "150",
-             "Maximum new accounts to follow per run. Keep at or below 150/day for responsible use and to stay well within GitHub's guidelines."),
-            ("UNFOLLOW_HOURS", "Unfollow After (hrs)",  False, "24",
-             "How many hours to wait before unfollowing someone who has not followed you back. "
-             "Default is 24 hours."),
-            ("ACTIVITY_DAYS",  "Activity Days",         False, "30",
-             "Skip users who have not pushed a commit in this many days. "
-             "Higher values are more lenient. Lower values are stricter."),
-            ("MIN_FOLLOWERS",  "Min Followers",         False, "1",
-             "Only follow users who already have at least this many followers. "
-             "Raising this filters out newer or abandoned accounts."),
-            ("CACHE_DAYS",     "Cache Days",            False, "7",
-             "How many days to remember quality check results. "
-             "Prevents re-checking the same accounts on every run and saves API quota."),
-            ("WHITELIST",      "Whitelist",             False, "",
-             "Comma-separated usernames to never unfollow, regardless of activity or follow-back status."),
+
+            (None, "FOLLOW BEHAVIOR", None, None, None),
+            ("FOLLOW_LIMIT",   "Follow Limit",        False, "150",
+             "Maximum new follows per run. Keep at or below 150/day."),
+            ("UNFOLLOW_HOURS", "Unfollow After (hrs)", False, "24",
+             "Hours before unfollowing a non-reciprocator."),
+            ("WHITELIST",      "Whitelist",            False, "",
+             "Comma-separated usernames to never unfollow."),
+
+            (None, "QUALITY FILTERS", None, None, None),
+            ("ACTIVITY_DAYS",        "Activity Days",    False, "30",
+             "Skip users who haven't pushed a commit in this many days."),
+            ("MIN_FOLLOWERS",        "Min Followers",    False, "1",
+             "Only follow users with at least this many followers."),
+            ("MAX_REPOS",            "Max Repos",        False, "500",
+             "Skip accounts with more public repos than this. Catches mass-forking bots."),
+            ("MAX_FF_RATIO",         "Max F/F Ratio",    False, "10.0",
+             "Skip accounts whose following/followers ratio exceeds this. "
+             "Filters follow-farmers."),
+            ("MIN_ACCOUNT_AGE_DAYS", "Min Account Age",  False, "30",
+             "Skip accounts newer than this many days. Filters throwaway accounts."),
+            ("CACHE_DAYS",           "Cache Days",       False, "7",
+             "Days to cache quality check results to save API quota."),
         ]
+
         self._settings_vars = {}
-        for i, (key, label, secret, default, tip) in enumerate(fields):
-            lbl_frame = tk.Frame(form, bg=SURFACE)
-            lbl_frame.grid(row=i, column=0, padx=(0, 10), pady=5, sticky="w")
-            tk.Label(lbl_frame, text=label, font=F_UI, bg=SURFACE,
-                     fg=TEXT, width=20, anchor="w").pack(side="left")
-            _help(lbl_frame, tip).pack(side="left", padx=(4, 0))
+        row_idx = 0
+        first_section = True
+
+        for item in FIELDS:
+            key, label, secret, default, tooltip = item
+
+            if key is None:
+                # Section separator + heading
+                if not first_section:
+                    tk.Frame(form, bg=C_SEP, height=1).grid(
+                        row=row_idx, column=0, columnspan=2,
+                        sticky="ew", pady=(10, 6)
+                    )
+                    row_idx += 1
+                first_section = False
+                tk.Label(form, text=label, font=("Segoe UI", 8, "bold"),
+                         bg=C_SURFACE, fg=C_MUTED).grid(
+                    row=row_idx, column=0, columnspan=2,
+                    sticky="w", pady=(0, 4)
+                )
+                row_idx += 1
+                continue
+
+            lbl_f = tk.Frame(form, bg=C_SURFACE)
+            lbl_f.grid(row=row_idx, column=0, padx=(0, 16), pady=4, sticky="w")
+            tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
+                     fg=C_TEXT, width=20, anchor="w").pack(side="left")
+            _tip(lbl_f, tooltip, bg=C_SURFACE).pack(side="left", padx=(4, 0))
 
             var = tk.StringVar(value=default)
             self._settings_vars[key] = var
-            ttk.Entry(form, textvariable=var, show="*" if secret else "",
-                      width=40).grid(row=i, column=1, pady=5, sticky="ew")
+            entry = tk.Entry(
+                form, textvariable=var, show="*" if secret else "",
+                font=F_UI, width=36,
+                bg=C_BG, fg=C_TEXT, relief="flat",
+                highlightthickness=1,
+                highlightbackground=C_SEP,
+                highlightcolor=C_ACCENT,
+                insertbackground=C_TEXT,
+            )
+            entry.grid(row=row_idx, column=1, pady=4, sticky="ew")
+            row_idx += 1
 
-        i = len(fields)
-        lbl_frame = tk.Frame(form, bg=SURFACE)
-        lbl_frame.grid(row=i, column=0, padx=(0, 10), pady=5, sticky="w")
-        tk.Label(lbl_frame, text="Quality Unfollow", font=F_UI,
-                 bg=SURFACE, fg=TEXT, width=20, anchor="w").pack(side="left")
-        _help(lbl_frame,
-              "When enabled, the Run Unfollow action scans your entire following list "
-              "and unfollows accounts that fail quality criteria: organizations, "
-              "users with no followers, and inactive users. "
-              "First run is slow, subsequent runs use the cache."
-              ).pack(side="left", padx=(4, 0))
+        # Quality unfollow toggle
+        tk.Frame(form, bg=C_SEP, height=1).grid(
+            row=row_idx, column=0, columnspan=2, sticky="ew", pady=(10, 6)
+        )
+        row_idx += 1
+        qu_f = tk.Frame(form, bg=C_SURFACE)
+        qu_f.grid(row=row_idx, column=0, padx=(0, 16), pady=4, sticky="w")
+        tk.Label(qu_f, text="Quality Unfollow", font=F_UI, bg=C_SURFACE,
+                 fg=C_TEXT, width=20, anchor="w").pack(side="left")
+        _tip(qu_f,
+             "When enabled, Run Unfollow also cleans up existing follows that fail "
+             "quality criteria. First run is slow; subsequent runs use the cache.",
+             bg=C_SURFACE).pack(side="left", padx=(4, 0))
         self._qu_var = tk.BooleanVar()
-        ttk.Checkbutton(form, variable=self._qu_var).grid(row=i, column=1, pady=5, sticky="w")
+        tk.Checkbutton(form, variable=self._qu_var,
+                       bg=C_SURFACE, activebackground=C_SURFACE,
+                       relief="flat").grid(row=row_idx, column=1, pady=4, sticky="w")
         form.columnconfigure(1, weight=1)
 
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=20)
+        # Save / load
+        tk.Frame(card, bg=C_SEP, height=1).pack(fill="x", padx=24)
+        btn_row = tk.Frame(card, bg=C_SURFACE)
+        btn_row.pack(fill="x", padx=24, pady=16)
+        RoundedButton(btn_row, "Save Settings", self._save_settings,
+                      width=130, height=34).pack(side="left", padx=(0, 12))
+        load_lbl = tk.Label(btn_row, text="Load from .env", font=F_SM,
+                            fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
+        load_lbl.pack(side="left")
+        load_lbl.bind("<Button-1>", lambda _e: self._load_settings())
 
-        btn_row = tk.Frame(f, bg=SURFACE)
-        btn_row.pack(fill="x", padx=20, pady=14)
-        ttk.Button(btn_row, text="Save Settings",
-                   style="Primary.TButton", command=self._save_settings).pack(side="left", padx=(0, 8))
-        ttk.Button(btn_row, text="Load from .env",
-                   command=self._load_settings).pack(side="left")
-
-        self._settings_msg = tk.Label(f, text="", font=F_SM, bg=SURFACE)
-        self._settings_msg.pack(anchor="w", padx=20, pady=(0, 12))
+        self._settings_msg = tk.Label(card, text="", font=F_SM, bg=C_SURFACE)
+        self._settings_msg.pack(anchor="w", padx=24, pady=(0, 12))
 
     def _save_settings(self):
         env = {k: v.get() for k, v in self._settings_vars.items()}
         env["QUALITY_UNFOLLOW"] = "true" if self._qu_var.get() else "false"
         save_env(env)
-        self._settings_msg.config(
-            text=f"Saved to {ENV_FILE}",
-            fg=SUCCESS,
-        )
+        self._settings_msg.config(text=f"Saved to {ENV_FILE}", fg=C_SUCCESS)
         self._set_status("Settings saved.")
         self._run_checks()
 
@@ -660,9 +892,9 @@ class App(tk.Tk):
         for k, var in self._settings_vars.items():
             var.set(env.get(k, var.get()))
         self._qu_var.set(env.get("QUALITY_UNFOLLOW", "false").lower() == "true")
-        self._settings_msg.config(text=f"Loaded from {ENV_FILE}", fg=MUTED)
+        self._settings_msg.config(text=f"Loaded from {ENV_FILE}", fg=C_MUTED)
 
-    # ── Status bar and lifecycle ───────────────────────────────────────────────
+    # ── Shared ─────────────────────────────────────────────────────────────────
 
     def _set_status(self, msg: str):
         self._status_var.set(msg)

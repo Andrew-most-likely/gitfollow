@@ -71,7 +71,7 @@ _BOT_NAME_RE = re.compile(r'^\d+$|[\-_]?(bot|mirror|backup|clone|archive|crawler
 HEADERS = {
     "Authorization": f"token {TOKEN}",
     "Accept": "application/vnd.github.v3+json",
-    "User-Agent": "GitFollow/1.5 (+https://github.com/Andrew-most-likely/gitfollow)",
+    "User-Agent": "GitFollow/2.0 (+https://github.com/Andrew-most-likely/gitfollow)",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
