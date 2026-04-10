@@ -488,6 +488,7 @@ def do_quality_unfollows(state: dict, my_following: set):
     quota = checks_remaining()
     cache_hits = 0
 
+    unfollowed = 0
     for i, login in enumerate(candidates):
         if stop_event.is_set():
             log.info("Stop requested - halting quality unfollow pass.")
@@ -504,26 +505,25 @@ def do_quality_unfollows(state: dict, my_following: set):
         ok, reason = cached_quality_check(login, cache)
         if was_cached:
             cache_hits += 1
-        if not ok:
-            to_drop.append((login, reason))
 
-        # Read-only pass -no secondary rate limit risk, short sleep is fine
-        time.sleep(0.1)
+        if not ok:
+            code = api_delete(f"https://api.github.com/user/following/{login}")
+            if code in (204, 404):
+                log.info("Quality-unfollowed %s (%s)", login, reason)
+                state["following"].pop(login, None)
+                state["stats"]["unfollowed"] += 1
+                unfollowed += 1
+            else:
+                log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
+            time.sleep(0.5)
+        else:
+            # Read-only pass -no secondary rate limit risk, short sleep is fine
+            time.sleep(0.1)
 
     log.info(
-        "Quality unfollow: evaluated=%d  cache_hits=%d  queued_to_drop=%d",
-        len(candidates), cache_hits, len(to_drop),
+        "Quality unfollow: evaluated=%d  cache_hits=%d  unfollowed=%d",
+        len(candidates), cache_hits, unfollowed,
     )
-
-    for login, reason in to_drop:
-        code = api_delete(f"https://api.github.com/user/following/{login}")
-        if code in (204, 404):
-            log.info("Quality-unfollowed %s (%s)", login, reason)
-            state["following"].pop(login, None)
-            state["stats"]["unfollowed"] += 1
-        else:
-            log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
-        time.sleep(0.5)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
