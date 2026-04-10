@@ -159,8 +159,16 @@ def is_quality_candidate(login: str) -> tuple:
     if data.get("followers", 0) == 0:
         return False, "no followers"
 
-    # Check for a recent push event (first page = newest 100 events)
     cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
+
+    # Fast path: profile updated_at older than cutoff means no activity — skip events fetch
+    updated_at_str = data.get("updated_at", "")
+    if updated_at_str:
+        updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+        if updated_at < cutoff:
+            return False, f"no activity in last {ACTIVITY_DAYS} days"
+
+    # Confirm recent activity is a push (not just a profile edit)
     events = paginate(f"https://api.github.com/users/{login}/events/public", max_pages=1)
     for event in events:
         if event.get("type") == "PushEvent":
@@ -287,14 +295,17 @@ def do_quality_unfollows(state: dict, my_following: set):
     are always skipped.
     """
     to_drop = []
+    candidates = [
+        l for l in my_following
+        if l not in WHITELIST and not state["following"].get(l, {}).get("mutual")
+    ]
+    quota = checks_remaining()
 
-    for login in list(my_following):
-        if login in WHITELIST:
-            continue
-        # Never quality-unfollow mutual follows
-        if state["following"].get(login, {}).get("mutual"):
-            continue
-        if checks_remaining() < 150:
+    for i, login in enumerate(candidates):
+        # Re-check quota every 50 users instead of every user
+        if i % 50 == 0:
+            quota = checks_remaining()
+        if quota < 150:
             log.warning("API quota low — stopping quality-unfollow checks early")
             break
 
@@ -303,7 +314,7 @@ def do_quality_unfollows(state: dict, my_following: set):
             to_drop.append((login, reason))
         time.sleep(0.5)
 
-    log.info("Quality unfollow: evaluated=%d  queued_to_drop=%d", len(my_following), len(to_drop))
+    log.info("Quality unfollow: evaluated=%d  queued_to_drop=%d", len(candidates), len(to_drop))
 
     for login, reason in to_drop:
         code = api_delete(f"https://api.github.com/user/following/{login}")
