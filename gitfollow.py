@@ -4,13 +4,16 @@ GitFollow - Automated GitHub follow/unfollow tool.
 Strategy:
   1. Unfollow anyone followed 24+ hours ago who hasn't followed back.
   2. Optionally unfollow existing follows that fail quality criteria (QUALITY_UNFOLLOW=true).
-  3. Follow new users from GitHub's global user list, filtered by quality criteria.
+  3. Follow new users sourced via GitHub search, filtered by quality criteria.
   4. Commit updated state back to the repo (when run via GitHub Actions).
 
 Quality criteria for a follow candidate:
   - Must be a regular User (not an Organization or bot)
-  - Must have at least 1 follower
+  - Must have at least MIN_FOLLOWERS followers
   - Must have pushed a commit within the last ACTIVITY_DAYS days
+
+Quality check results are cached in state.json for CACHE_DAYS days to avoid
+re-checking the same accounts on every run.
 
 Required env vars:
   GH_TOKEN        - GitHub personal access token (user:follow scope)
@@ -22,6 +25,8 @@ Optional env vars:
   WHITELIST         - Comma-separated usernames to never unfollow
   STATE_FILE        - Path to state JSON file (default: data/state.json)
   ACTIVITY_DAYS     - Days of inactivity before skipping a candidate (default: 30)
+  MIN_FOLLOWERS     - Minimum followers a candidate must have (default: 1)
+  CACHE_DAYS        - How long to cache quality check results (default: 7)
   QUALITY_UNFOLLOW  - Set to "true" to unfollow existing follows that fail quality criteria
 """
 
@@ -43,6 +48,8 @@ UNFOLLOW_HRS      = int(os.environ.get("UNFOLLOW_HOURS", 24))
 WHITELIST         = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
 STATE_FILE        = Path(os.environ.get("STATE_FILE", "data/state.json"))
 ACTIVITY_DAYS     = int(os.environ.get("ACTIVITY_DAYS", 30))
+MIN_FOLLOWERS     = int(os.environ.get("MIN_FOLLOWERS", 1))
+CACHE_DAYS        = int(os.environ.get("CACHE_DAYS", 7))
 QUALITY_UNFOLLOW  = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true"
 
 HEADERS = {
@@ -59,7 +66,12 @@ def load_state() -> dict:
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
-    return {"following": {}, "whitelist": [], "stats": {"followed": 0, "unfollowed": 0, "mutual": 0}}
+    return {
+        "following": {},
+        "whitelist": [],
+        "quality_cache": {},
+        "stats": {"followed": 0, "unfollowed": 0, "mutual": 0},
+    }
 
 
 def save_state(state: dict):
@@ -145,8 +157,8 @@ def checks_remaining() -> int:
 def is_quality_candidate(login: str) -> tuple:
     """
     Returns (True, "") if the user is worth following, else (False, reason).
-    Criteria: real User (not Org), has at least 1 follower, pushed a commit
-    within the last ACTIVITY_DAYS days.
+    Criteria: real User (not Org), has at least MIN_FOLLOWERS followers, pushed
+    a commit within the last ACTIVITY_DAYS days.
     """
     resp = api_get(f"https://api.github.com/users/{login}")
     if resp.status_code != 200:
@@ -156,8 +168,8 @@ def is_quality_candidate(login: str) -> tuple:
     if data.get("type", "User") != "User":
         return False, "organization/bot"
 
-    if data.get("followers", 0) == 0:
-        return False, "no followers"
+    if data.get("followers", 0) < MIN_FOLLOWERS:
+        return False, f"fewer than {MIN_FOLLOWERS} followers"
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
 
@@ -179,6 +191,27 @@ def is_quality_candidate(login: str) -> tuple:
                     return True, ""
 
     return False, f"no commits in last {ACTIVITY_DAYS} days"
+
+
+def cached_quality_check(login: str, cache: dict) -> tuple:
+    """
+    Returns (ok, reason) from cache if fresh, otherwise calls is_quality_candidate
+    and stores the result.
+    """
+    cache_cutoff = datetime.now(timezone.utc) - timedelta(days=CACHE_DAYS)
+    entry = cache.get(login)
+    if entry:
+        checked_at = datetime.fromisoformat(entry["checked_at"])
+        if checked_at >= cache_cutoff:
+            return entry["ok"], entry["reason"]
+
+    ok, reason = is_quality_candidate(login)
+    cache[login] = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "ok": ok,
+        "reason": reason,
+    }
+    return ok, reason
 
 # ── Core logic ────────────────────────────────────────────────────────────────
 
@@ -214,32 +247,62 @@ def do_unfollows(state: dict, my_followers: set):
 
 def candidate_pool(already_in_state: set, my_following: set) -> list:
     """
-    Pull users from GitHub's global user list starting at a random offset.
-    Returns a shuffled list of logins not already tracked/followed.
+    Pull candidates via GitHub user search, pre-filtered to users with followers
+    and repos. Varies sort order each run for diversity.
+    Falls back to the global /users list if search fails.
     """
     skip = already_in_state | my_following | {USERNAME.lower()}
     candidates = []
 
-    # GitHub's /users endpoint paginates by `since` (last seen user ID).
-    # Start at a random ID so we don't always hit the same accounts.
-    since = random.randint(0, 5_000_000)
+    # Vary sort order each run so we don't always get the same accounts
+    sort, order = random.choice([
+        ("joined", "desc"),
+        ("joined", "asc"),
+        ("repositories", "desc"),
+        ("followers", "desc"),
+    ])
+    query = f"type:user followers:>={MIN_FOLLOWERS} repos:>=1"
+    pages_needed = min((FOLLOW_LIMIT // 100) + 3, 10)  # Search API caps at 10 pages / 1000 results
 
-    log.info("Fetching global users since id=%d …", since)
-    # Each page returns up to 100 users; grab enough to fill the follow limit
-    pages_needed = (FOLLOW_LIMIT // 100) + 3
-    for _ in range(pages_needed):
-        resp = api_get("https://api.github.com/users", {"since": since, "per_page": 100})
+    log.info("Searching for candidates (sort=%s order=%s) …", sort, order)
+    for page in range(1, pages_needed + 1):
+        resp = api_get("https://api.github.com/search/users", {
+            "q": query,
+            "sort": sort,
+            "order": order,
+            "per_page": 100,
+            "page": page,
+        })
         if resp.status_code != 200:
+            log.warning("Search API returned %s — falling back to /users", resp.status_code)
             break
-        batch = resp.json()
-        if not batch:
+        items = resp.json().get("items", [])
+        if not items:
             break
-        for u in batch:
+        for u in items:
             login = u["login"].lower()
             if login not in skip:
                 candidates.append(login)
                 skip.add(login)
-        since = batch[-1]["id"]
+        time.sleep(2)  # Search API rate limit: 30 req/min authenticated
+
+    # Fallback: global /users list if search yielded nothing
+    if not candidates:
+        since = random.randint(0, 5_000_000)
+        log.info("Falling back to global users since id=%d …", since)
+        for _ in range(pages_needed):
+            resp = api_get("https://api.github.com/users", {"since": since, "per_page": 100})
+            if resp.status_code != 200:
+                break
+            batch = resp.json()
+            if not batch:
+                break
+            for u in batch:
+                login = u["login"].lower()
+                if login not in skip:
+                    candidates.append(login)
+                    skip.add(login)
+            since = batch[-1]["id"]
 
     random.shuffle(candidates)
     return candidates
@@ -248,7 +311,8 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
 def do_follows(state: dict, my_following: set, my_followers: set):
     """Follow up to FOLLOW_LIMIT new users."""
     already_tracked = set(state["following"].keys())
-    pool = candidate_pool(already_tracked, my_following)
+    pool  = candidate_pool(already_tracked, my_following)
+    cache = state.setdefault("quality_cache", {})
 
     followed = 0
     now_iso  = datetime.now(timezone.utc).isoformat()
@@ -266,8 +330,8 @@ def do_follows(state: dict, my_following: set, my_followers: set):
             state["stats"]["mutual"] += 1
             continue
 
-        # Quality gate: skip orgs, inactive users, and users with no followers
-        ok, reason = is_quality_candidate(login)
+        # Quality gate (cached)
+        ok, reason = cached_quality_check(login, cache)
         if not ok:
             log.debug("Skipping %s: %s", login, reason)
             continue
@@ -290,16 +354,18 @@ def do_follows(state: dict, my_following: set, my_followers: set):
 def do_quality_unfollows(state: dict, my_following: set):
     """
     Unfollow accounts we currently follow that fail quality criteria:
-    orgs/corporations, users with no followers, or users inactive for
+    orgs/corporations, users with too few followers, or users inactive for
     more than ACTIVITY_DAYS days.  Mutual follows and whitelisted accounts
-    are always skipped.
+    are always skipped.  Results are cached to avoid redundant API calls.
     """
+    cache = state.setdefault("quality_cache", {})
     to_drop = []
     candidates = [
         l for l in my_following
         if l not in WHITELIST and not state["following"].get(l, {}).get("mutual")
     ]
     quota = checks_remaining()
+    cache_hits = 0
 
     for i, login in enumerate(candidates):
         # Re-check quota every 50 users instead of every user
@@ -309,12 +375,21 @@ def do_quality_unfollows(state: dict, my_following: set):
             log.warning("API quota low — stopping quality-unfollow checks early")
             break
 
-        ok, reason = is_quality_candidate(login)
+        # cached_quality_check skips the API entirely if a fresh result exists
+        was_cached = login in cache
+        ok, reason = cached_quality_check(login, cache)
+        if was_cached:
+            cache_hits += 1
         if not ok:
             to_drop.append((login, reason))
-        time.sleep(0.5)
 
-    log.info("Quality unfollow: evaluated=%d  queued_to_drop=%d", len(candidates), len(to_drop))
+        # Read-only pass — no secondary rate limit risk, short sleep is fine
+        time.sleep(0.1)
+
+    log.info(
+        "Quality unfollow: evaluated=%d  cache_hits=%d  queued_to_drop=%d",
+        len(candidates), cache_hits, len(to_drop),
+    )
 
     for login, reason in to_drop:
         code = api_delete(f"https://api.github.com/user/following/{login}")
@@ -348,7 +423,7 @@ def main():
         log.error("Quota too low to proceed safely — aborting")
         return
 
-    state      = load_state()
+    state        = load_state()
     my_following = get_my_following()
     my_followers = get_my_followers()
 
