@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Andrew-most-likely/gitfollow)](https://github.com/Andrew-most-likely/gitfollow/releases/latest)
 
-<img width="958" height="665" alt="image" src="https://github.com/user-attachments/assets/22641d3c-2742-4133-ab60-8d10c1ba6225" />
+<img width="1906" height="1272" alt="Dashboard" src="https://github.com/user-attachments/assets/9dc5cc74-64f2-42df-989d-9bdf76813310" />
 
 GitFollow helps you discover and connect with active GitHub developers. It identifies real, recently active users who are likely to engage with your work, follows them on your behalf, and cleans up connections that never became mutual. All API usage is rate-limited, politely delayed, and fully identified to GitHub via a proper User-Agent header in compliance with the [GitHub API Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
@@ -38,6 +38,8 @@ GitFollow helps you discover and connect with active GitHub developers. It ident
 > **Need a token?** Click the "Create GitHub Token →" button in the Setup tab, or go to
 > [github.com/settings/tokens](https://github.com/settings/tokens/new?scopes=user%3Afollow&description=GitFollow)
 > Only the `user:follow` scope is required.
+
+<img width="1906" height="1270" alt="Setup" src="https://github.com/user-attachments/assets/e5a78d6a-a70b-4c20-83bd-c5825c1b75b9" />
 
 ---
 
@@ -92,6 +94,8 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 1. Scans your entire following list against quality criteria
 2. Unfollows orgs, inactive users, and users with no followers
 3. Uses cached results -after the first run (which is slow) subsequent passes take minutes
+
+<img width="1904" height="1274" alt="Run" src="https://github.com/user-attachments/assets/b086a540-87de-4994-84f6-93ca448d7bde" />
 
 ---
 
