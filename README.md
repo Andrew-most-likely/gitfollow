@@ -131,9 +131,9 @@ The file is excluded from git (`.gitignore`) and never committed to the repo. St
 ## FAQ
 
 **Does this comply with GitHub's Terms of Service?**
-Automated follow/unfollow is explicitly covered by GitHub's [Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) (Section 4 — spam and inauthentic activity) and the [Disrupting the Experience of Other Users](https://docs.github.com/en/site-policy/acceptable-use-policies/github-disrupting-the-experience-of-other-users) policy, which prohibits "starring and/or following accounts or repositories in large volume in a short period of time."
+Automated follow/unfollow is explicitly covered by GitHub's [Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) (Section 4 - spam and inauthentic activity) and the [Disrupting the Experience of Other Users](https://docs.github.com/en/site-policy/acceptable-use-policies/github-disrupting-the-experience-of-other-users) policy, which prohibits "starring and/or following accounts or repositories in large volume in a short period of time."
 
-GitFollow does respect all rate limits, identifies itself via a proper `User-Agent` header, and targets only real active developers — but the core follow/unfollow mechanic still falls under those policies. Use it at your own risk and keep limits conservative.
+GitFollow does respect all rate limits, identifies itself via a proper `User-Agent` header, and targets only real active developers - but the core follow/unfollow mechanic still falls under those policies. Use it at your own risk and keep limits conservative.
 
 **How long does the quality unfollow pass take on first run?**
 Roughly 2 minutes of sleep time per 1,000 accounts (evaluation is read-only, uses a short 0.1s delay). Results are cached so subsequent weekly runs are near-instant.
