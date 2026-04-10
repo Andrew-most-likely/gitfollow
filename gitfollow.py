@@ -3,18 +3,26 @@ GitFollow - Automated GitHub follow/unfollow tool.
 
 Strategy:
   1. Unfollow anyone followed 24+ hours ago who hasn't followed back.
-  2. Follow new users sourced from followers of configured target accounts.
-  3. Commit updated state back to the repo (when run via GitHub Actions).
+  2. Optionally unfollow existing follows that fail quality criteria (QUALITY_UNFOLLOW=true).
+  3. Follow new users from GitHub's global user list, filtered by quality criteria.
+  4. Commit updated state back to the repo (when run via GitHub Actions).
+
+Quality criteria for a follow candidate:
+  - Must be a regular User (not an Organization or bot)
+  - Must have at least 1 follower
+  - Must have pushed a commit within the last ACTIVITY_DAYS days
 
 Required env vars:
   GH_TOKEN        - GitHub personal access token (user:follow scope)
   GH_USERNAME     - Your GitHub username
 
 Optional env vars:
-  FOLLOW_LIMIT    - Max new follows per run (default: 400)
-  UNFOLLOW_HOURS  - Hours before unfollowing non-followers (default: 24)
-  WHITELIST       - Comma-separated usernames to never unfollow
-  STATE_FILE      - Path to state JSON file (default: data/state.json)
+  FOLLOW_LIMIT      - Max new follows per run (default: 400)
+  UNFOLLOW_HOURS    - Hours before unfollowing non-followers (default: 24)
+  WHITELIST         - Comma-separated usernames to never unfollow
+  STATE_FILE        - Path to state JSON file (default: data/state.json)
+  ACTIVITY_DAYS     - Days of inactivity before skipping a candidate (default: 30)
+  QUALITY_UNFOLLOW  - Set to "true" to unfollow existing follows that fail quality criteria
 """
 
 import os
@@ -30,10 +38,12 @@ from pathlib import Path
 
 TOKEN        = os.environ["GH_TOKEN"]
 USERNAME     = os.environ["GH_USERNAME"]
-FOLLOW_LIMIT = int(os.environ.get("FOLLOW_LIMIT", 400))
-UNFOLLOW_HRS = int(os.environ.get("UNFOLLOW_HOURS", 24))
-WHITELIST    = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
-STATE_FILE   = Path(os.environ.get("STATE_FILE", "data/state.json"))
+FOLLOW_LIMIT      = int(os.environ.get("FOLLOW_LIMIT", 400))
+UNFOLLOW_HRS      = int(os.environ.get("UNFOLLOW_HOURS", 24))
+WHITELIST         = {u.strip().lower() for u in os.environ.get("WHITELIST", "").split(",") if u.strip()}
+STATE_FILE        = Path(os.environ.get("STATE_FILE", "data/state.json"))
+ACTIVITY_DAYS     = int(os.environ.get("ACTIVITY_DAYS", 30))
+QUALITY_UNFOLLOW  = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true"
 
 HEADERS = {
     "Authorization": f"token {TOKEN}",
@@ -132,18 +142,35 @@ def checks_remaining() -> int:
     return 0
 
 
-def is_bot_or_org(login: str) -> bool:
-    """Quick heuristic — skip accounts that look like bots/orgs."""
+def is_quality_candidate(login: str) -> tuple:
+    """
+    Returns (True, "") if the user is worth following, else (False, reason).
+    Criteria: real User (not Org), has at least 1 follower, pushed a commit
+    within the last ACTIVITY_DAYS days.
+    """
     resp = api_get(f"https://api.github.com/users/{login}")
     if resp.status_code != 200:
-        return True
+        return False, "profile fetch failed"
     data = resp.json()
+
     if data.get("type", "User") != "User":
-        return True
-    # Skip zero-activity accounts
-    if data.get("public_repos", 0) == 0 and data.get("followers", 0) == 0:
-        return True
-    return False
+        return False, "organization/bot"
+
+    if data.get("followers", 0) == 0:
+        return False, "no followers"
+
+    # Check for a recent push event (first page = newest 100 events)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
+    events = paginate(f"https://api.github.com/users/{login}/events/public", max_pages=1)
+    for event in events:
+        if event.get("type") == "PushEvent":
+            ts = event.get("created_at", "")
+            if ts:
+                created_at = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if created_at >= cutoff:
+                    return True, ""
+
+    return False, f"no commits in last {ACTIVITY_DAYS} days"
 
 # ── Core logic ────────────────────────────────────────────────────────────────
 
@@ -231,6 +258,12 @@ def do_follows(state: dict, my_following: set, my_followers: set):
             state["stats"]["mutual"] += 1
             continue
 
+        # Quality gate: skip orgs, inactive users, and users with no followers
+        ok, reason = is_quality_candidate(login)
+        if not ok:
+            log.debug("Skipping %s: %s", login, reason)
+            continue
+
         code = api_put(f"https://api.github.com/user/following/{login}")
         if code in (204, 200):
             log.info("[%d/%d] Followed: %s", followed + 1, FOLLOW_LIMIT, login)
@@ -244,6 +277,43 @@ def do_follows(state: dict, my_following: set, my_followers: set):
         time.sleep(random.uniform(2.0, 4.0))
 
     log.info("Followed %d new users this run", followed)
+
+
+def do_quality_unfollows(state: dict, my_following: set):
+    """
+    Unfollow accounts we currently follow that fail quality criteria:
+    orgs/corporations, users with no followers, or users inactive for
+    more than ACTIVITY_DAYS days.  Mutual follows and whitelisted accounts
+    are always skipped.
+    """
+    to_drop = []
+
+    for login in list(my_following):
+        if login in WHITELIST:
+            continue
+        # Never quality-unfollow mutual follows
+        if state["following"].get(login, {}).get("mutual"):
+            continue
+        if checks_remaining() < 150:
+            log.warning("API quota low — stopping quality-unfollow checks early")
+            break
+
+        ok, reason = is_quality_candidate(login)
+        if not ok:
+            to_drop.append((login, reason))
+        time.sleep(0.5)
+
+    log.info("Quality unfollow: evaluated=%d  queued_to_drop=%d", len(my_following), len(to_drop))
+
+    for login, reason in to_drop:
+        code = api_delete(f"https://api.github.com/user/following/{login}")
+        if code in (204, 404):
+            log.info("Quality-unfollowed %s (%s)", login, reason)
+            state["following"].pop(login, None)
+            state["stats"]["unfollowed"] += 1
+        else:
+            log.warning("Quality-unfollow failed for %s — HTTP %s", login, code)
+        time.sleep(0.5)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -282,6 +352,11 @@ def main():
 
     # 2. Unfollow non-reciprocators
     do_unfollows(state, my_followers)
+
+    # 2b. Unfollow existing follows that fail quality criteria (opt-in)
+    if QUALITY_UNFOLLOW:
+        log.info("Quality-unfollow pass enabled (QUALITY_UNFOLLOW=true)")
+        do_quality_unfollows(state, my_following)
 
     # 3. Follow new candidates
     do_follows(state, my_following, my_followers)
