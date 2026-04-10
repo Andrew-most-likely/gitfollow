@@ -89,7 +89,7 @@ def api_get(url: str, params: dict = None) -> requests.Response:
         if resp.status_code == 429 or (resp.status_code == 403 and "rate limit" in resp.text.lower()):
             reset = int(resp.headers.get("X-RateLimit-Reset", time.time() + 60))
             wait  = max(reset - time.time(), 1)
-            log.warning("Rate limited — sleeping %.0fs", wait)
+            log.warning("Rate limited -sleeping %.0fs", wait)
             time.sleep(wait)
             continue
         return resp
@@ -106,7 +106,7 @@ def api_write(method: str, url: str) -> int:
             )
         ):
             retry_after = int(resp.headers.get("Retry-After", 60))
-            log.warning("Secondary rate limit hit — sleeping %ds", retry_after)
+            log.warning("Secondary rate limit hit -sleeping %ds", retry_after)
             time.sleep(retry_after)
             continue
         return resp.status_code
@@ -173,7 +173,7 @@ def is_quality_candidate(login: str) -> tuple:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
 
-    # Fast path: profile updated_at older than cutoff means no activity — skip events fetch
+    # Fast path: profile updated_at older than cutoff means no activity -skip events fetch
     updated_at_str = data.get("updated_at", "")
     if updated_at_str:
         updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
@@ -224,7 +224,7 @@ def do_unfollows(state: dict, my_followers: set):
         if login.lower() in WHITELIST:
             continue
         if login.lower() in my_followers:
-            # They followed back — mark mutual, keep following
+            # They followed back -mark mutual, keep following
             if not info.get("mutual"):
                 info["mutual"] = True
                 state["stats"]["mutual"] += 1
@@ -241,7 +241,7 @@ def do_unfollows(state: dict, my_followers: set):
             del state["following"][login]
             state["stats"]["unfollowed"] += 1
         else:
-            log.warning("Unfollow failed for %s — HTTP %s", login, code)
+            log.warning("Unfollow failed for %s -HTTP %s", login, code)
         time.sleep(0.5)
 
 
@@ -274,7 +274,7 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
             "page": page,
         })
         if resp.status_code != 200:
-            log.warning("Search API returned %s — falling back to /users", resp.status_code)
+            log.warning("Search API returned %s -falling back to /users", resp.status_code)
             break
         items = resp.json().get("items", [])
         if not items:
@@ -321,7 +321,7 @@ def do_follows(state: dict, my_following: set, my_followers: set):
         if followed >= FOLLOW_LIMIT:
             break
         if checks_remaining() < 50:
-            log.warning("API quota nearly exhausted — stopping follows early")
+            log.warning("API quota nearly exhausted -stopping follows early")
             break
 
         # Skip if they already follow us (no point in the follow-back game)
@@ -343,9 +343,9 @@ def do_follows(state: dict, my_following: set, my_followers: set):
             state["stats"]["followed"] += 1
             followed += 1
         else:
-            log.warning("Follow failed for %s — HTTP %s", login, code)
+            log.warning("Follow failed for %s -HTTP %s", login, code)
 
-        # Polite delay — avoid secondary rate limits
+        # Polite delay -avoid secondary rate limits
         time.sleep(random.uniform(2.0, 4.0))
 
     log.info("Followed %d new users this run", followed)
@@ -372,7 +372,7 @@ def do_quality_unfollows(state: dict, my_following: set):
         if i % 50 == 0:
             quota = checks_remaining()
         if quota < 150:
-            log.warning("API quota low — stopping quality-unfollow checks early")
+            log.warning("API quota low -stopping quality-unfollow checks early")
             break
 
         # cached_quality_check skips the API entirely if a fresh result exists
@@ -383,7 +383,7 @@ def do_quality_unfollows(state: dict, my_following: set):
         if not ok:
             to_drop.append((login, reason))
 
-        # Read-only pass — no secondary rate limit risk, short sleep is fine
+        # Read-only pass -no secondary rate limit risk, short sleep is fine
         time.sleep(0.1)
 
     log.info(
@@ -398,7 +398,7 @@ def do_quality_unfollows(state: dict, my_following: set):
             state["following"].pop(login, None)
             state["stats"]["unfollowed"] += 1
         else:
-            log.warning("Quality-unfollow failed for %s — HTTP %s", login, code)
+            log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
         time.sleep(0.5)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -409,18 +409,18 @@ def main():
     # Verify the token identity
     resp = api_get("https://api.github.com/user")
     if resp.status_code != 200:
-        log.error("Token is invalid or unauthenticated — HTTP %s", resp.status_code)
+        log.error("Token is invalid or unauthenticated -HTTP %s", resp.status_code)
         return
     authed_as = resp.json().get("login", "unknown")
     log.info("Token authenticated as: %s", authed_as)
     if authed_as.lower() != USERNAME.lower():
-        log.error("Token user (%s) does not match GH_USERNAME (%s) — aborting", authed_as, USERNAME)
+        log.error("Token user (%s) does not match GH_USERNAME (%s) -aborting", authed_as, USERNAME)
         return
 
     remaining = checks_remaining()
     log.info("API quota remaining: %d", remaining)
     if remaining < 100:
-        log.error("Quota too low to proceed safely — aborting")
+        log.error("Quota too low to proceed safely -aborting")
         return
 
     state        = load_state()

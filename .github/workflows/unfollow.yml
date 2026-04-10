@@ -2,7 +2,7 @@ name: GitFollow Unfollow
 
 on:
   schedule:
-    # Runs once per week on Sunday at 10:00 UTC — adjust to your liking
+    # Runs once per week on Sunday at 10:00 UTC - adjust to your liking
     - cron: "0 10 * * 0"
   workflow_dispatch:        # Also lets you trigger manually from the Actions tab
 
