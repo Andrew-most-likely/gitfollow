@@ -28,7 +28,7 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "2.2.0"
+VERSION = "2.3.2"
 
 # ── GitHub Dark Dimmed color tokens ───────────────────────────────────────────
 
