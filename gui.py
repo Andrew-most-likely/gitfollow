@@ -28,7 +28,7 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # ── GitHub Dark Dimmed color tokens ───────────────────────────────────────────
 
@@ -1336,6 +1336,12 @@ class App(tk.Tk):
              "Skip users who haven't pushed a commit in this many days."),
             ("MIN_FOLLOWERS",        "Min Followers",    False, "1",
              "Only follow users with at least this many followers."),
+            ("SEARCH_MIN_FOLLOWERS", "Search Min Followers", False, "10",
+             "Pre-filter the user search query: only fetch candidates with at least this many followers. "
+             "Reduces wasted API calls on ghost accounts. Sweet spot: 10–50."),
+            ("SEARCH_MAX_FOLLOWERS", "Search Max Followers", False, "1000",
+             "Pre-filter the user search query: skip candidates above this follower count. "
+             "High-follower accounts rarely follow back. Sweet spot: 500–2000."),
             ("MAX_REPOS",            "Max Repos",        False, "500",
              "Skip accounts with more public repos than this. Catches mass-forking bots."),
             ("MAX_FF_RATIO",         "Max F/F Ratio",    False, "10.0",
@@ -1428,7 +1434,8 @@ class App(tk.Tk):
 
     def _save_settings(self):
         _INT_FIELDS   = {"FOLLOW_LIMIT", "UNFOLLOW_HOURS", "ACTIVITY_DAYS",
-                         "MIN_FOLLOWERS", "MAX_REPOS", "MIN_ACCOUNT_AGE_DAYS", "CACHE_DAYS"}
+                         "MIN_FOLLOWERS", "MAX_REPOS", "MIN_ACCOUNT_AGE_DAYS", "CACHE_DAYS",
+                         "SEARCH_MIN_FOLLOWERS", "SEARCH_MAX_FOLLOWERS"}
         _FLOAT_FIELDS = {"MAX_FF_RATIO"}
         env = {k: v.get() for k, v in self._settings_vars.items()}
         for k in _INT_FIELDS:

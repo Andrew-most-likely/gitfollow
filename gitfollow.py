@@ -36,6 +36,8 @@ Optional env vars:
   MIN_ACCOUNT_AGE_DAYS - Skip accounts newer than this many days (default: 30)
   CACHE_DAYS           - How long to cache quality check results (default: 7)
   QUALITY_UNFOLLOW     - Set to "true" to unfollow existing follows that fail quality criteria
+  SEARCH_MIN_FOLLOWERS - Pre-filter search: min followers in query, avoids fetching ghost accounts (default: 10)
+  SEARCH_MAX_FOLLOWERS - Pre-filter search: max followers in query, skips high-follower accounts unlikely to follow back (default: 1000)
 """
 
 import os
@@ -64,6 +66,8 @@ MAX_FF_RATIO         = float(os.environ.get("MAX_FF_RATIO", 10.0))
 MIN_ACCOUNT_AGE_DAYS = int(os.environ.get("MIN_ACCOUNT_AGE_DAYS", 30))
 CACHE_DAYS           = int(os.environ.get("CACHE_DAYS", 7))
 QUALITY_UNFOLLOW     = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "true"
+SEARCH_MIN_FOLLOWERS = int(os.environ.get("SEARCH_MIN_FOLLOWERS", 10))
+SEARCH_MAX_FOLLOWERS = int(os.environ.get("SEARCH_MAX_FOLLOWERS", 1000))
 
 # Bot-like username patterns: all-numeric, or keywords common in automated accounts
 _BOT_NAME_RE = re.compile(r'^\d+$|[\-_]?(bot|mirror|backup|clone|archive|crawler|scraper)[\-_]?', re.I)
@@ -362,13 +366,12 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
 
     # ── Source 2: user search fallback (no join-date sort — attracts new bots) ─
     if len(candidates) < target:
-        min_followers_search = max(MIN_FOLLOWERS, 5)  # never search for <5 followers
         sort, order = random.choice([
             ("repositories", "desc"),
             ("followers", "desc"),
             ("followers", "asc"),
         ])
-        query = f"type:user followers:>={min_followers_search} repos:2..200"
+        query = f"type:user followers:{SEARCH_MIN_FOLLOWERS}..{SEARCH_MAX_FOLLOWERS} repos:2..200"
         pages_needed = min(((target - len(candidates)) // 100) + 2, 10)
         log.info("User search fallback (sort=%s %s) ...", sort, order)
         for page in range(1, pages_needed + 1):
