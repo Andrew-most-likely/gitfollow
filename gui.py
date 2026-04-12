@@ -628,6 +628,13 @@ class App(tk.Tk):
                         self._dash_ts.config(text=f"Updated {ts}"),
                         self._set_status("Dashboard refreshed."),
                     ))
+                elif resp.status_code == 401:
+                    self.after(0, lambda: (
+                        self._stat_vars["following"].set("--"),
+                        self._stat_vars["followers"].set("--"),
+                        self._dash_ts.config(text="Auth error (401)"),
+                        self._set_status("401 Unauthorized — token is invalid or expired. Update GH_TOKEN in Settings."),
+                    ))
                 else:
                     self.after(0, lambda: (
                         self._stat_vars["following"].set("Err"),
@@ -1088,6 +1095,10 @@ class App(tk.Tk):
                                    self._set_status(f"Fetching {lbl}... ({n} loaded)"))
                         r = _req.get(url, headers=hdrs,
                                      params={"per_page": 100, "page": page}, timeout=20)
+                        if r.status_code == 401:
+                            raise PermissionError(
+                                "401 Unauthorized — token is invalid or expired. Update GH_TOKEN in Settings."
+                            )
                         if r.status_code != 200:
                             break
                         batch = r.json()
@@ -1235,6 +1246,12 @@ class App(tk.Tk):
                         f"https://api.github.com/user/following/{login}",
                         headers=hdrs, timeout=15,
                     )
+                    if r.status_code == 401:
+                        self.after(0, lambda: self._set_status(
+                            "401 Unauthorized — token is invalid or expired. Update GH_TOKEN in Settings."
+                        ))
+                        failed.extend(selected[selected.index(login):])
+                        break
                     (success if r.status_code in (204, 404) else failed).append(login)
                 except Exception:
                     failed.append(login)

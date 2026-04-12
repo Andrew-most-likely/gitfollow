@@ -110,6 +110,9 @@ def api_get(url: str, params: dict = None) -> requests.Response:
     """GET with automatic rate-limit back-off."""
     while True:
         resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        if resp.status_code == 401:
+            log.error("AUTH ERROR 401 on GET %s — token is invalid, expired, or revoked", url)
+            return resp
         if resp.status_code == 429 or (resp.status_code == 403 and "rate limit" in resp.text.lower()):
             reset = int(resp.headers.get("X-RateLimit-Reset", time.time() + 60))
             wait  = max(reset - time.time(), 1)
@@ -123,6 +126,9 @@ def api_write(method: str, url: str) -> int:
     """PUT/DELETE with secondary rate-limit back-off."""
     while True:
         resp = requests.request(method, url, headers=HEADERS, timeout=30)
+        if resp.status_code == 401:
+            log.error("AUTH ERROR 401 on %s %s — token is invalid, expired, or revoked", method, url)
+            return resp.status_code
         if resp.status_code == 429 or (
             resp.status_code == 403 and (
                 "rate limit" in resp.text.lower() or
@@ -151,7 +157,11 @@ def paginate(url: str, params: dict = None, max_pages: int = 10) -> list:
     while page <= max_pages:
         p["page"] = page
         resp = api_get(url, p)
+        if resp.status_code == 401:
+            log.error("Aborting pagination of %s — 401 Unauthorized (check GH_TOKEN)", url)
+            break
         if resp.status_code != 200:
+            log.warning("Pagination stopped at page %d for %s — HTTP %s", page, url, resp.status_code)
             break
         batch = resp.json()
         if not batch:
@@ -553,8 +563,11 @@ def main():
 
     # Verify the token identity
     resp = api_get("https://api.github.com/user")
+    if resp.status_code == 401:
+        log.error("Token rejected with 401 Unauthorized — verify GH_TOKEN is valid and not expired/revoked")
+        return
     if resp.status_code != 200:
-        log.error("Token is invalid or unauthenticated -HTTP %s", resp.status_code)
+        log.error("Token check failed — HTTP %s", resp.status_code)
         return
     authed_as = resp.json().get("login", "unknown")
     log.info("Token authenticated as: %s", authed_as)
