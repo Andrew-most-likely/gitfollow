@@ -256,6 +256,8 @@ class _GUILogHandler(logging.Handler):
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
+MAX_LOG_LINES = 2000   # keep the last N lines in the output terminal
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -264,11 +266,14 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.minsize(960, 640)
         self.configure(bg=C_SIDEBAR)
-        self._running       = False
-        self._pages         = {}
-        self._nav_frames    = {}
-        self._current_page  = None
-        self._log_queue     = queue.Queue()
+        self._running            = False
+        self._stop_requested_early = False   # stop clicked before _gf_module was set
+        self._pages              = {}
+        self._nav_frames         = {}
+        self._current_page       = None
+        self._log_queue          = queue.Queue()
+        self._log_line_count     = 0
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
         self.after(50,  self._poll_log_queue)
         self.after(100, self._on_open)
@@ -548,7 +553,7 @@ class App(tk.Tk):
         card_defs = [
             ("following",  "FOLLOWING",       "Your current total following count on GitHub."),
             ("followers",  "FOLLOWERS",        "Your current total follower count on GitHub."),
-            ("mutual",     "MUTUAL FOLLOWS",   "Accounts tracked by GitFollow that also follow you back."),
+            ("mutual",     "MUTUAL FOLLOWS",   "Accounts currently marked as mutual in state.json (they follow you back)."),
             ("followed",   "TOTAL FOLLOWED",   "Total accounts followed through GitFollow across all runs."),
             ("unfollowed", "TOTAL UNFOLLOWED", "Total accounts unfollowed through GitFollow across all runs."),
             ("cached",     "CACHED CHECKS",    "Quality check results stored locally to avoid re-checking."),
@@ -588,7 +593,12 @@ class App(tk.Tk):
         state = load_state()
         stats = state.get("stats", {})
         cache = state.get("quality_cache", {})
-        self._stat_vars["mutual"].set(f"{stats.get('mutual', 0):,}")
+        # Compute current mutual count directly from state (not the lifetime counter,
+        # which never decrements when someone unfollows you).
+        current_mutual = sum(
+            1 for v in state.get("following", {}).values() if v.get("mutual")
+        )
+        self._stat_vars["mutual"].set(f"{current_mutual:,}")
         self._stat_vars["followed"].set(f"{stats.get('followed', 0):,}")
         self._stat_vars["unfollowed"].set(f"{stats.get('unfollowed', 0):,}")
         self._stat_vars["cached"].set(f"{len(cache):,}")
@@ -761,7 +771,7 @@ class App(tk.Tk):
         self._log_write(
             f"\n{'=' * 60}\n"
             f"  GitFollow  -  {mode.title()} Run  -  "
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
             f"{'=' * 60}\n\n"
         )
         handler = _GUILogHandler(self._log_write)
@@ -781,11 +791,16 @@ class App(tk.Tk):
                 importlib.reload(_gf)
                 _gf.stop_event.clear()
                 self._gf_module = _gf
+                # Honour a stop that was requested during the module reload
+                if self._stop_requested_early:
+                    self._stop_requested_early = False
+                    _gf.stop_event.set()
                 _gf.main()
             except Exception as e:
                 self._log_write(f"\nERROR: {e}\n")
             finally:
                 root_log.removeHandler(handler)
+                self._gf_module = None
                 self.after(0, self._run_done)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -794,9 +809,13 @@ class App(tk.Tk):
         gf = getattr(self, "_gf_module", None)
         if gf:
             gf.stop_event.set()
+        else:
+            # Module not yet assigned (clicked Stop during reload) — flag it so
+            # the worker honours the request once the module is ready.
+            self._stop_requested_early = True
         self._btn_stop.config_state(disabled=True)
-        self._set_status("Stop requested - finishing current operation...")
-        self._log_write("\n  Stop requested - will halt after current operation.\n")
+        self._set_status("Stop requested — finishing current operation...")
+        self._log_write("\n  Stop requested — will halt after current operation.\n")
 
     def _run_done(self):
         self._running = False
@@ -805,7 +824,7 @@ class App(tk.Tk):
         self._btn_stop.config_state(disabled=True)
         self._log_write(
             f"\n{'=' * 60}\n"
-            f"  Run complete  -  {datetime.now().strftime('%H:%M:%S')}\n"
+            f"  Run complete  -  {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC\n"
             f"{'=' * 60}\n"
         )
         self._set_status("Run complete.")
@@ -815,21 +834,32 @@ class App(tk.Tk):
         self._log_queue.put(text)
 
     def _poll_log_queue(self):
+        messages = []
         try:
             while True:
-                text = self._log_queue.get_nowait()
-                self._log.config(state="normal")
-                self._log.insert(tk.END, text)
-                self._log.see(tk.END)
-                self._log.config(state="disabled")
+                messages.append(self._log_queue.get_nowait())
         except queue.Empty:
             pass
+        if messages:
+            combined = "".join(messages)
+            new_lines = combined.count("\n")
+            self._log.config(state="normal")
+            self._log.insert(tk.END, combined)
+            self._log_line_count += new_lines
+            # Prune oldest lines to keep the widget bounded
+            if self._log_line_count > MAX_LOG_LINES:
+                excess = self._log_line_count - MAX_LOG_LINES
+                self._log.delete("1.0", f"{excess + 1}.0")
+                self._log_line_count = MAX_LOG_LINES
+            self._log.see(tk.END)
+            self._log.config(state="disabled")
         self.after(50, self._poll_log_queue)
 
     def _clear_log(self):
         self._log.config(state="normal")
         self._log.delete("1.0", tk.END)
         self._log.config(state="disabled")
+        self._log_line_count = 0
 
     # ── People page ────────────────────────────────────────────────────────────
 
@@ -866,10 +896,11 @@ class App(tk.Tk):
         tk.Label(action_bar, textvariable=self._people_sel_var,
                  font=F_SM, bg=C_SURFACE, fg=C_MUTED).pack(side="left", padx=16, pady=10)
 
-        sel_all = tk.Label(action_bar, text="Select All", font=F_SM,
+        sel_all = tk.Label(action_bar, text="Select Page", font=F_SM,
                            fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
         sel_all.pack(side="left", padx=(0, 12))
         sel_all.bind("<Button-1>", lambda _e: self._people_select_all(True))
+        Tooltip(sel_all, "Selects all accounts on the current page (50 at a time).")
 
         desel_all = tk.Label(action_bar, text="Deselect All", font=F_SM,
                              fg=C_ACCENT, bg=C_SURFACE, cursor="hand2")
@@ -1088,9 +1119,9 @@ class App(tk.Tk):
                     "Accept": "application/vnd.github.v3+json",
                 }
 
-                def _paginate(url, label):
+                def _paginate(url, label, max_pages=50):
                     results, page = [], 1
-                    while True:
+                    while page <= max_pages:
                         self.after(0, lambda n=len(results), lbl=label:
                                    self._set_status(f"Fetching {lbl}... ({n} loaded)"))
                         r = _req.get(url, headers=hdrs,
@@ -1495,6 +1526,20 @@ class App(tk.Tk):
         self._run_checks()
         self._refresh_dashboard()
         self._load_settings()
+
+    def _on_close(self):
+        if self._running:
+            if not messagebox.askyesno(
+                "Run in progress",
+                "A run is still in progress.\n\n"
+                "Closing now will stop it immediately — any follows or unfollows "
+                "already made this run will NOT be saved to state.json.\n\n"
+                "Close anyway?",
+            ):
+                return
+            # Request a graceful stop so the worker thread can exit cleanly
+            self._stop_run()
+        self.destroy()
 
 
 if __name__ == "__main__":

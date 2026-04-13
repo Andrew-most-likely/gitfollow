@@ -25,10 +25,10 @@ Required env vars:
   GH_USERNAME     - Your GitHub username
 
 Optional env vars:
-  FOLLOW_LIMIT      - Max new follows per run (default: 150)
-  UNFOLLOW_HOURS    - Hours before unfollowing non-followers (default: 24)
-  WHITELIST         - Comma-separated usernames to never unfollow
-  STATE_FILE        - Path to state JSON file (default: data/state.json)
+  FOLLOW_LIMIT         - Max new follows per run (default: 150)
+  UNFOLLOW_HOURS       - Hours before unfollowing non-followers (default: 24)
+  WHITELIST            - Comma-separated usernames to never unfollow
+  STATE_FILE           - Path to state JSON file (default: data/state.json)
   ACTIVITY_DAYS        - Days of inactivity before skipping a candidate (default: 30)
   MIN_FOLLOWERS        - Minimum followers a candidate must have (default: 1)
   MAX_REPOS            - Skip accounts with more public repos than this (default: 500)
@@ -36,8 +36,8 @@ Optional env vars:
   MIN_ACCOUNT_AGE_DAYS - Skip accounts newer than this many days (default: 30)
   CACHE_DAYS           - How long to cache quality check results (default: 7)
   QUALITY_UNFOLLOW     - Set to "true" to unfollow existing follows that fail quality criteria
-  SEARCH_MIN_FOLLOWERS - Pre-filter search: min followers in query, avoids fetching ghost accounts (default: 10)
-  SEARCH_MAX_FOLLOWERS - Pre-filter search: max followers in query, skips high-follower accounts unlikely to follow back (default: 1000)
+  SEARCH_MIN_FOLLOWERS - Pre-filter search: min followers in query (default: 10)
+  SEARCH_MAX_FOLLOWERS - Pre-filter search: max followers in query (default: 1000)
 """
 
 import os
@@ -47,9 +47,31 @@ import time
 import random
 import logging
 import threading
+import tempfile
 import requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# ── .env loader (headless / CLI support) ──────────────────────────────────────
+# Load .env from the script's own directory before reading any env vars.
+# gui.py handles this for GUI runs; this block makes "python gitfollow.py" work too.
+
+def _load_dotenv():
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                k = k.strip()
+                if k and k not in os.environ:   # never override already-set vars
+                    os.environ[k] = v.strip()
+    except Exception:
+        pass
+
+_load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -69,11 +91,21 @@ QUALITY_UNFOLLOW     = os.environ.get("QUALITY_UNFOLLOW", "false").lower() == "t
 SEARCH_MIN_FOLLOWERS = int(os.environ.get("SEARCH_MIN_FOLLOWERS", 10))
 SEARCH_MAX_FOLLOWERS = int(os.environ.get("SEARCH_MAX_FOLLOWERS", 1000))
 
-# Bot-like username patterns: all-numeric, or keywords common in automated accounts
-_BOT_NAME_RE = re.compile(r'^\d+$|[\-_]?(bot|mirror|backup|clone|archive|crawler|scraper)[\-_]?', re.I)
+# How long to remember explicitly-unfollowed accounts to prevent re-following them.
+UNFOLLOW_MEMORY_DAYS = CACHE_DAYS * 4   # default 28 days
+
+# Bot-like username patterns.
+# Requires keyword to appear at a delimiter boundary (-, _) or at string start/end.
+# This avoids false-positives like "robotics" or "cloner" while still catching
+# "my-bot", "bot_xyz", "data-crawler", "github-mirror" etc.
+_BOT_NAME_RE = re.compile(
+    r'^\d+$'
+    r'|(^|[-_])(bot|mirror|backup|clone|archive|crawler|scraper)([-_]|$)',
+    re.I,
+)
 
 HEADERS = {
-    "Authorization": f"token {TOKEN}",
+    "Authorization": f"Bearer {TOKEN}",
     "Accept": "application/vnd.github.v3+json",
     "User-Agent": "GitFollow/2.0 (+https://github.com/Andrew-most-likely/gitfollow)",
 }
@@ -88,36 +120,64 @@ stop_event = threading.Event()
 
 def load_state() -> dict:
     if STATE_FILE.exists():
-        with open(STATE_FILE) as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            log.warning("state.json unreadable (%s) — starting fresh", e)
     return {
         "following": {},
-        "whitelist": [],
+        "unfollowed_seen": {},
         "quality_cache": {},
         "stats": {"followed": 0, "unfollowed": 0, "mutual": 0},
     }
 
 
 def save_state(state: dict):
+    """Atomic write: write to a temp file then replace, preventing corruption on crash."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    tmp = STATE_FILE.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        tmp.replace(STATE_FILE)
+    except Exception as e:
+        log.error("Failed to save state: %s", e)
+        tmp.unlink(missing_ok=True)
+        raise
     log.info("State saved → %s", STATE_FILE)
 
 # ── GitHub API helpers ────────────────────────────────────────────────────────
 
+def _interruptible_sleep(seconds: float):
+    """Sleep in 1-second chunks so stop_event can interrupt rate-limit waits."""
+    end = time.time() + seconds
+    while time.time() < end:
+        if stop_event.is_set():
+            return
+        time.sleep(min(1.0, end - time.time()))
+
+
 def api_get(url: str, params: dict = None) -> requests.Response:
     """GET with automatic rate-limit back-off."""
     while True:
-        resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        try:
+            resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
+        except requests.Timeout:
+            log.warning("Timeout on GET %s — skipping", url)
+            # Return a fake response object with a non-retryable status so callers
+            # handle it gracefully rather than crashing the entire run.
+            return _timeout_response()
         if resp.status_code == 401:
             log.error("AUTH ERROR 401 on GET %s — token is invalid, expired, or revoked", url)
             return resp
         if resp.status_code == 429 or (resp.status_code == 403 and "rate limit" in resp.text.lower()):
             reset = int(resp.headers.get("X-RateLimit-Reset", time.time() + 60))
             wait  = max(reset - time.time(), 1)
-            log.warning("Rate limited -sleeping %.0fs", wait)
-            time.sleep(wait)
+            log.warning("Rate limited — sleeping %.0fs", wait)
+            _interruptible_sleep(wait)
+            if stop_event.is_set():
+                return resp
             continue
         return resp
 
@@ -125,7 +185,11 @@ def api_get(url: str, params: dict = None) -> requests.Response:
 def api_write(method: str, url: str) -> int:
     """PUT/DELETE with secondary rate-limit back-off."""
     while True:
-        resp = requests.request(method, url, headers=HEADERS, timeout=30)
+        try:
+            resp = requests.request(method, url, headers=HEADERS, timeout=30)
+        except requests.Timeout:
+            log.warning("Timeout on %s %s — skipping", method, url)
+            return 0
         if resp.status_code == 401:
             log.error("AUTH ERROR 401 on %s %s — token is invalid, expired, or revoked", method, url)
             return resp.status_code
@@ -136,10 +200,20 @@ def api_write(method: str, url: str) -> int:
             )
         ):
             retry_after = int(resp.headers.get("Retry-After", 60))
-            log.warning("Secondary rate limit hit -sleeping %ds", retry_after)
-            time.sleep(retry_after)
+            log.warning("Secondary rate limit hit — sleeping %ds", retry_after)
+            _interruptible_sleep(retry_after)
+            if stop_event.is_set():
+                return resp.status_code
             continue
         return resp.status_code
+
+
+class _timeout_response:
+    """Minimal stand-in returned when a request times out, so callers don't crash."""
+    status_code = 0
+    text        = ""
+    headers     = {}
+    def json(self): return {}
 
 
 def api_put(url: str) -> int:
@@ -154,11 +228,19 @@ def paginate(url: str, params: dict = None, max_pages: int = 10) -> list:
     """Collect all items from a paginated GitHub list endpoint."""
     items, page = [], 1
     p = {"per_page": 100, **(params or {})}
-    while page <= max_pages:
+    while page <= max(1, max_pages):
+        if stop_event.is_set():
+            break
         p["page"] = page
         resp = api_get(url, p)
         if resp.status_code == 401:
-            log.error("Aborting pagination of %s — 401 Unauthorized (check GH_TOKEN)", url)
+            if page > 1:
+                log.warning(
+                    "401 on page %d of %s — returning partial results (%d items so far)",
+                    page, url, len(items),
+                )
+            else:
+                log.error("Aborting pagination of %s — 401 Unauthorized (check GH_TOKEN)", url)
             break
         if resp.status_code != 200:
             log.warning("Pagination stopped at page %d for %s — HTTP %s", page, url, resp.status_code)
@@ -187,6 +269,8 @@ def checks_remaining() -> int:
         return resp.json()["resources"]["core"]["remaining"]
     return 0
 
+
+# ── Quality filter ─────────────────────────────────────────────────────────────
 
 def is_quality_candidate(login: str) -> tuple:
     """
@@ -236,12 +320,12 @@ def is_quality_candidate(login: str) -> tuple:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
 
-    # Fast path: profile updated_at older than cutoff means no activity -skip events fetch
+    # Fast path: profile updated_at older than cutoff means no activity — skip events fetch
     updated_at_str = data.get("updated_at", "")
     if updated_at_str:
         updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
         if updated_at < cutoff:
-            return False, f"no activity in last {ACTIVITY_DAYS} days"
+            return False, f"inactive (no GitHub activity in {ACTIVITY_DAYS}d)"
 
     # Confirm recent activity is a push (not just a profile edit)
     events = paginate(f"https://api.github.com/users/{login}/events/public", max_pages=1)
@@ -253,7 +337,7 @@ def is_quality_candidate(login: str) -> tuple:
                 if created_at >= cutoff:
                     return True, ""
 
-    return False, f"no commits in last {ACTIVITY_DAYS} days"
+    return False, f"no push commits in last {ACTIVITY_DAYS}d"
 
 
 def cached_quality_check(login: str, cache: dict) -> tuple:
@@ -264,9 +348,13 @@ def cached_quality_check(login: str, cache: dict) -> tuple:
     cache_cutoff = datetime.now(timezone.utc) - timedelta(days=CACHE_DAYS)
     entry = cache.get(login)
     if entry:
-        checked_at = datetime.fromisoformat(entry["checked_at"])
-        if checked_at >= cache_cutoff:
-            return entry["ok"], entry["reason"]
+        try:
+            checked_at = datetime.fromisoformat(entry["checked_at"])
+            if checked_at >= cache_cutoff:
+                return entry["ok"], entry["reason"]
+        except (KeyError, ValueError):
+            # Corrupt or malformed cache entry — treat as a miss and re-check
+            pass
 
     ok, reason = is_quality_candidate(login)
     cache[login] = {
@@ -287,28 +375,38 @@ def do_unfollows(state: dict, my_followers: set):
         if login.lower() in WHITELIST:
             continue
         if login.lower() in my_followers:
-            # They followed back -mark mutual, keep following
+            # They followed back — mark mutual (only increment stat on first detection)
             if not info.get("mutual"):
                 info["mutual"] = True
                 state["stats"]["mutual"] += 1
                 log.info("Mutual follow: %s", login)
             continue
+        # Not following us back — reset any stale mutual flag
+        if info.get("mutual"):
+            info["mutual"] = False
+            log.info("No longer following back: %s", login)
         followed_at = datetime.fromisoformat(info["followed_at"])
         if followed_at <= cutoff:
             to_drop.append(login)
 
     for login in to_drop:
+        if stop_event.is_set():
+            log.info("Stop requested — halting unfollow pass.")
+            break
         code = api_delete(f"https://api.github.com/user/following/{login}")
         if code in (204, 404):
             log.info("Unfollowed: %s", login)
             del state["following"][login]
             state["stats"]["unfollowed"] += 1
+            # Remember this account so we don't re-follow it immediately
+            state.setdefault("unfollowed_seen", {})[login] = \
+                datetime.now(timezone.utc).isoformat()
         else:
-            log.warning("Unfollow failed for %s -HTTP %s", login, code)
+            log.warning("Unfollow failed for %s — HTTP %s", login, code)
         time.sleep(0.5)
 
 
-def candidate_pool(already_in_state: set, my_following: set) -> list:
+def candidate_pool(already_in_state: set, my_following: set, unfollowed_seen: set) -> list:
     """
     Pull candidates from two high-signal sources:
       1. Stargazers of popular repos in curated tech topics (primary).
@@ -316,7 +414,7 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
       2. GitHub user search sorted by followers/repos (fallback).
          Never sorts by join date — that heavily favours brand-new bot accounts.
     """
-    skip = already_in_state | my_following | {USERNAME.lower()}
+    skip = already_in_state | my_following | unfollowed_seen | {USERNAME.lower()}
     candidates = []
     target = FOLLOW_LIMIT * 4  # gather ~4× the limit so quality filter has room to work
 
@@ -356,9 +454,8 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
                 break
             full_name = repo["full_name"]
             log.info("Pulling stargazers from %s ...", full_name)
-            # Pick a random page of stargazers so we don't always get the same early followers
             page = random.randint(1, max(1, repo["stargazers_count"] // 100))
-            page = min(page, 400)  # API won't serve beyond page ~400
+            page = min(page, 400)
             resp2 = api_get(f"https://api.github.com/repos/{full_name}/stargazers", {
                 "per_page": 100,
                 "page": page,
@@ -436,8 +533,9 @@ def candidate_pool(already_in_state: set, my_following: set) -> list:
 
 def do_follows(state: dict, my_following: set, my_followers: set):
     """Follow up to FOLLOW_LIMIT new users."""
-    already_tracked = set(state["following"].keys())
-    pool  = candidate_pool(already_tracked, my_following)
+    already_tracked  = set(state["following"].keys())
+    unfollowed_seen  = set(state.get("unfollowed_seen", {}).keys())
+    pool  = candidate_pool(already_tracked, my_following, unfollowed_seen)
     cache = state.setdefault("quality_cache", {})
 
     followed  = 0
@@ -449,14 +547,14 @@ def do_follows(state: dict, my_following: set, my_followers: set):
 
     for login in pool:
         if stop_event.is_set():
-            log.info("Stop requested - halting follow pass.")
+            log.info("Stop requested — halting follow pass.")
             break
         if followed >= FOLLOW_LIMIT:
             break
-        if checked % 50 == 0 and checked > 0:
+        if checked % 100 == 0 and checked > 0:
             quota = checks_remaining()
         if quota < 50:
-            log.warning("API quota nearly exhausted - stopping follows early")
+            log.warning("API quota nearly exhausted — stopping follows early")
             break
 
         # Skip if they already follow us (no point in the follow-back game)
@@ -477,9 +575,9 @@ def do_follows(state: dict, my_following: set, my_followers: set):
             state["stats"]["followed"] += 1
             followed += 1
         else:
-            log.warning("Follow failed for %s -HTTP %s", login, code)
+            log.warning("Follow failed for %s — HTTP %s", login, code)
 
-        # Polite delay -avoid secondary rate limits
+        # Polite delay — avoid secondary rate limits
         time.sleep(random.uniform(2.0, 4.0))
 
     log.info("Followed %d new users this run", followed)
@@ -494,27 +592,34 @@ def do_quality_unfollows(state: dict, my_following: set):
     """
     cache = state.setdefault("quality_cache", {})
     to_drop = []
+    # Only scan accounts still tracked in state (excludes any already unfollowed
+    # earlier in this same run by do_unfollows).
     candidates = [
         l for l in my_following
-        if l not in WHITELIST and not state["following"].get(l, {}).get("mutual")
+        if l in state["following"]
+        and l not in WHITELIST
+        and not state["following"].get(l, {}).get("mutual")
     ]
     total = len(candidates)
     quota = checks_remaining()
     cache_hits = 0
+    actual_scanned = 0
 
     log.info("Scanning %d followed accounts for quality (quota=%d) ...", total, quota)
 
     # Phase 1: scan the full list, log each result, build to_drop
     for i, login in enumerate(candidates, 1):
         if stop_event.is_set():
-            log.info("Stop requested - halting quality unfollow scan.")
+            log.info("Stop requested — halting quality unfollow scan.")
             break
-        if i % 50 == 1 and i > 1:
+        # Refresh quota every 100 accounts (less frequent to save API calls)
+        if i % 100 == 1 and i > 1:
             quota = checks_remaining()
         if quota < 150:
-            log.warning("API quota low - stopping quality-unfollow checks early")
+            log.warning("API quota low — stopping quality-unfollow checks early")
             break
 
+        actual_scanned = i
         was_cached = login in cache
         ok, reason = cached_quality_check(login, cache)
         if was_cached:
@@ -522,31 +627,32 @@ def do_quality_unfollows(state: dict, my_following: set):
 
         if ok:
             log.info("  [%d/%d] Keeping %s (good quality)", i, total, login)
-            time.sleep(0.1)
         else:
             log.info("  [%d/%d] Queued to unfollow %s: %s", i, total, login, reason)
             to_drop.append((login, reason))
-            time.sleep(0.1)
+        time.sleep(0.1)
 
     log.info(
-        "Scan complete: evaluated=%d  cache_hits=%d  to_unfollow=%d",
-        total, cache_hits, len(to_drop),
+        "Scan complete: scanned=%d of %d  cache_hits=%d  to_unfollow=%d",
+        actual_scanned, total, cache_hits, len(to_drop),
     )
 
     # Phase 2: unfollow the queued accounts
     unfollowed = 0
     for login, reason in to_drop:
         if stop_event.is_set():
-            log.info("Stop requested - halting quality unfollow pass.")
+            log.info("Stop requested — halting quality unfollow pass.")
             break
         code = api_delete(f"https://api.github.com/user/following/{login}")
         if code in (204, 404):
             log.info("Quality-unfollowed %s (%s)", login, reason)
             state["following"].pop(login, None)
             state["stats"]["unfollowed"] += 1
+            state.setdefault("unfollowed_seen", {})[login] = \
+                datetime.now(timezone.utc).isoformat()
             unfollowed += 1
         else:
-            log.warning("Quality-unfollow failed for %s -HTTP %s", login, code)
+            log.warning("Quality-unfollow failed for %s — HTTP %s", login, code)
         time.sleep(0.5)
 
     log.info("Quality unfollow complete: unfollowed=%d", unfollowed)
@@ -561,6 +667,10 @@ def main():
 
     log.info("=== GitFollow starting | user=%s ===", USERNAME)
 
+    if stop_event.is_set():
+        log.info("Stop requested before run — aborting.")
+        return
+
     # Verify the token identity
     resp = api_get("https://api.github.com/user")
     if resp.status_code == 401:
@@ -572,29 +682,56 @@ def main():
     authed_as = resp.json().get("login", "unknown")
     log.info("Token authenticated as: %s", authed_as)
     if authed_as.lower() != USERNAME.lower():
-        log.error("Token user (%s) does not match GH_USERNAME (%s) -aborting", authed_as, USERNAME)
+        log.error("Token user (%s) does not match GH_USERNAME (%s) — aborting", authed_as, USERNAME)
         return
 
     remaining = checks_remaining()
     log.info("API quota remaining: %d", remaining)
     if remaining < 100:
-        log.error("Quota too low to proceed safely -aborting")
+        log.error("Quota too low to proceed safely — aborting")
         return
 
-    state        = load_state()
+    state = load_state()
 
     # Prune stale quality-cache entries so state.json doesn't grow forever
     cache = state.setdefault("quality_cache", {})
     cache_cutoff = datetime.now(timezone.utc) - timedelta(days=CACHE_DAYS)
-    stale = [k for k, v in cache.items()
-             if datetime.fromisoformat(v["checked_at"]) < cache_cutoff]
-    if stale:
-        for k in stale:
+    stale_cache = [
+        k for k, v in cache.items()
+        if _safe_fromisoformat(v.get("checked_at", "")) < cache_cutoff
+    ]
+    if stale_cache:
+        for k in stale_cache:
             del cache[k]
-        log.info("Pruned %d stale cache entries", len(stale))
+        log.info("Pruned %d stale cache entries", len(stale_cache))
+
+    # Prune old unfollowed_seen entries
+    unfollowed_seen = state.setdefault("unfollowed_seen", {})
+    memory_cutoff = datetime.now(timezone.utc) - timedelta(days=UNFOLLOW_MEMORY_DAYS)
+    stale_seen = [
+        k for k, v in unfollowed_seen.items()
+        if _safe_fromisoformat(v) < memory_cutoff
+    ]
+    if stale_seen:
+        for k in stale_seen:
+            del unfollowed_seen[k]
+        log.info("Pruned %d expired unfollow-memory entries", len(stale_seen))
+
+    if stop_event.is_set():
+        log.info("Stop requested — aborting before API fetch.")
+        return
 
     my_following = get_my_following()
+
+    if stop_event.is_set():
+        log.info("Stop requested — aborting after following fetch.")
+        return
+
     my_followers = get_my_followers()
+
+    if stop_event.is_set():
+        log.info("Stop requested — aborting after followers fetch.")
+        return
 
     log.info("Currently following=%d  followers=%d  tracked=%d",
              len(my_following), len(my_followers), len(state["following"]))
@@ -613,18 +750,23 @@ def main():
             state["following"][login] = {"followed_at": now_iso, "mutual": False}
             backfilled += 1
     if backfilled:
-        log.info("Backfilled %d externally-followed accounts with current timestamp", backfilled)
+        log.info(
+            "Backfilled %d externally-followed accounts with current timestamp "
+            "(they become eligible for unfollow after %dh if no follow-back)",
+            backfilled, UNFOLLOW_HRS,
+        )
 
     # 2. Unfollow non-reciprocators
     do_unfollows(state, my_followers)
 
     # 2b. Unfollow existing follows that fail quality criteria (opt-in)
-    if QUALITY_UNFOLLOW:
+    if QUALITY_UNFOLLOW and not stop_event.is_set():
         log.info("Quality-unfollow pass enabled (QUALITY_UNFOLLOW=true)")
         do_quality_unfollows(state, my_following)
 
     # 3. Follow new candidates
-    do_follows(state, my_following, my_followers)
+    if not stop_event.is_set():
+        do_follows(state, my_following, my_followers)
 
     # 4. Persist
     save_state(state)
@@ -632,6 +774,14 @@ def main():
     stats = state["stats"]
     log.info("=== Done | total_followed=%d  unfollowed=%d  mutual=%d ===",
              stats["followed"], stats["unfollowed"], stats["mutual"])
+
+
+def _safe_fromisoformat(s: str) -> datetime:
+    """Parse ISO datetime string, returning epoch on any failure."""
+    try:
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 if __name__ == "__main__":

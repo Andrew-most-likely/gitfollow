@@ -30,7 +30,6 @@ jobs:
           --onefile
           --windowed
           --name GitFollow
-          --add-data "gitfollow.py;."
           gui.py
 
       - name: Upload artifact

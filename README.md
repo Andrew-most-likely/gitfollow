@@ -83,7 +83,7 @@ Browse and manage your network without running a full pass.
 
 - **Following** - full list with relative timestamps showing how long ago you followed each account
 - **Followers** - everyone who follows you, with mutual accounts surfaced to the top
-- **Multi-select unfollow** - checkboxes, Select All / Deselect All, confirm and unfollow in bulk
+- **Multi-select unfollow** - checkboxes, Select Page / Deselect All, confirm and unfollow in bulk (selection applies to the current page only)
 - **Paginated** - 50 accounts per page for fast rendering even with large lists
 - Usernames are clickable links that open the GitHub profile in your browser
 
@@ -110,6 +110,8 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 | `QUALITY_UNFOLLOW` | `false` | Set to `true` to unfollow existing follows failing quality criteria |
 | `WHITELIST` | - | Comma-separated usernames to never unfollow |
 | `STATE_FILE` | `data/state.json` | Path to the state file |
+| `SEARCH_MIN_FOLLOWERS` | `10` | Pre-filter search candidates by minimum follower count |
+| `SEARCH_MAX_FOLLOWERS` | `1000` | Pre-filter search candidates by maximum follower count |
 
 ---
 
@@ -139,7 +141,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name GitFollow --add-data "gitfollow.py;." gui.py
+pyinstaller --onefile --windowed --name GitFollow gui.py
 # Output: dist/GitFollow.exe
 ```
 
