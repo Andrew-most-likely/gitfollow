@@ -763,7 +763,10 @@ class App(tk.Tk):
         if mode == "unfollow":
             env["QUALITY_UNFOLLOW"] = "true"
             env["FOLLOW_LIMIT"]     = "0"
+            env.pop("FOLLOW_ONLY", None)
+            os.environ.pop("FOLLOW_ONLY", None)
         else:
+            env["FOLLOW_ONLY"] = "true"
             env.pop("QUALITY_UNFOLLOW", None)
             os.environ.pop("QUALITY_UNFOLLOW", None)
             os.environ.pop("FOLLOW_LIMIT", None)

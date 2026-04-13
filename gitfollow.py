@@ -756,11 +756,13 @@ def main():
             backfilled, UNFOLLOW_HRS,
         )
 
-    # 2. Unfollow non-reciprocators
-    do_unfollows(state, my_followers)
+    # 2. Unfollow non-reciprocators (skipped in follow-only mode)
+    follow_only = os.environ.get("FOLLOW_ONLY", "false").lower() == "true"
+    if not follow_only:
+        do_unfollows(state, my_followers)
 
     # 2b. Unfollow existing follows that fail quality criteria (opt-in)
-    if QUALITY_UNFOLLOW and not stop_event.is_set():
+    if not follow_only and QUALITY_UNFOLLOW and not stop_event.is_set():
         log.info("Quality-unfollow pass enabled (QUALITY_UNFOLLOW=true)")
         do_quality_unfollows(state, my_following)
 
