@@ -30,6 +30,7 @@ jobs:
           --onefile
           --windowed
           --name GitFollow
+          --icon=assets/icon.ico
           gui.py
 
       - name: Upload artifact

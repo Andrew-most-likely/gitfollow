@@ -1,11 +1,13 @@
-# GitFollow
+<div align="center">
+  <img src="assets/banner.svg" alt="GitFollow" width="100%"/>
+  <br/><br/>
+  <a href="https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml"><img src="https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml/badge.svg" alt="Build"/></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="Python"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/></a>
+  <a href="https://github.com/Andrew-most-likely/gitfollow/releases/latest"><img src="https://img.shields.io/github/v/release/Andrew-most-likely/gitfollow" alt="GitHub release"/></a>
+</div>
 
-> Discover and connect with active GitHub developers who share your interests.
-
-[![Build](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml/badge.svg)](https://github.com/Andrew-most-likely/gitfollow/actions/workflows/build-exe.yml)
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/Andrew-most-likely/gitfollow)](https://github.com/Andrew-most-likely/gitfollow/releases/latest)
+<br/>
 
 <img width="1906" height="1272" alt="Dashboard" src="https://github.com/user-attachments/assets/9dc5cc74-64f2-42df-989d-9bdf76813310" />
 
@@ -141,7 +143,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name GitFollow gui.py
+pyinstaller --onefile --windowed --name GitFollow --icon=assets/icon.ico gui.py
 # Output: dist/GitFollow.exe
 ```
 

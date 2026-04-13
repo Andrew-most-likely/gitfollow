@@ -266,6 +266,12 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.minsize(960, 640)
         self.configure(bg=C_SIDEBAR)
+        _icon = BASE_DIR / "assets" / "icon.ico"
+        if _icon.exists():
+            try:
+                self.iconbitmap(str(_icon))
+            except Exception:
+                pass
         self._running            = False
         self._stop_requested_early = False   # stop clicked before _gf_module was set
         self._pages              = {}

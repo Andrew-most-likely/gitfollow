@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#1c2128"/>
+      <stop offset="100%" stop-color="#22272e"/>
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#539bf5" stop-opacity="0"/>
+      <stop offset="30%"  stop-color="#539bf5"/>
+      <stop offset="70%"  stop-color="#539bf5"/>
+      <stop offset="100%" stop-color="#539bf5" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="rounded">
+      <rect width="1200" height="280" rx="16" ry="16"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="280" rx="16" ry="16" fill="url(#bg)"/>
+
+  <!-- Subtle grid lines -->
+  <g clip-path="url(#rounded)" opacity="0.04">
+    <line x1="0" y1="56"  x2="1200" y2="56"  stroke="#539bf5" stroke-width="1"/>
+    <line x1="0" y1="112" x2="1200" y2="112" stroke="#539bf5" stroke-width="1"/>
+    <line x1="0" y1="168" x2="1200" y2="168" stroke="#539bf5" stroke-width="1"/>
+    <line x1="0" y1="224" x2="1200" y2="224" stroke="#539bf5" stroke-width="1"/>
+    <line x1="200"  y1="0" x2="200"  y2="280" stroke="#539bf5" stroke-width="1"/>
+    <line x1="400"  y1="0" x2="400"  y2="280" stroke="#539bf5" stroke-width="1"/>
+    <line x1="600"  y1="0" x2="600"  y2="280" stroke="#539bf5" stroke-width="1"/>
+    <line x1="800"  y1="0" x2="800"  y2="280" stroke="#539bf5" stroke-width="1"/>
+    <line x1="1000" y1="0" x2="1000" y2="280" stroke="#539bf5" stroke-width="1"/>
+  </g>
+
+  <!-- Accent glow top edge -->
+  <rect x="0" y="0" width="1200" height="2" fill="url(#accentLine)" opacity="0.8"/>
+
+  <!-- Icon group (left side) -->
+  <g transform="translate(90, 100)">
+    <!-- Icon background rounded square -->
+    <rect x="0" y="0" width="80" height="80" rx="16" fill="#22272e" stroke="#539bf5" stroke-width="1.5" opacity="0.9"/>
+    <!-- Person head -->
+    <circle cx="34" cy="26" r="13" fill="#539bf5"/>
+    <!-- Person body -->
+    <ellipse cx="34" cy="53" rx="17" ry="14" fill="#539bf5"/>
+    <!-- + badge -->
+    <circle cx="60" cy="58" r="15" fill="#57ab5a"/>
+    <rect x="54" y="56.5" width="12" height="3" rx="1.5" fill="white"/>
+    <rect x="58.5" y="52" width="3" height="12" rx="1.5" fill="white"/>
+  </g>
+
+  <!-- Title -->
+  <text x="200" y="148" font-family="'Segoe UI', system-ui, sans-serif" font-size="64" font-weight="700" fill="#adbac7" letter-spacing="-1">
+    Git<tspan fill="#539bf5">Follow</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="202" y="188" font-family="'Segoe UI', system-ui, sans-serif" font-size="20" fill="#768390" letter-spacing="0.3">
+    Discover and connect with active GitHub developers who share your interests
+  </text>
+
+  <!-- Pills / badges row -->
+  <g transform="translate(202, 212)">
+    <!-- Quality filter pill -->
+    <rect x="0" y="0" width="168" height="28" rx="14" fill="#2d333b"/>
+    <circle cx="18" cy="14" r="5" fill="#57ab5a"/>
+    <text x="30" y="19" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" fill="#adbac7">8-signal quality filter</text>
+
+    <!-- Auto-unfollow pill -->
+    <rect x="180" y="0" width="148" height="28" rx="14" fill="#2d333b"/>
+    <circle cx="198" cy="14" r="5" fill="#539bf5"/>
+    <text x="210" y="19" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" fill="#adbac7">smart auto-unfollow</text>
+
+    <!-- Cache pill -->
+    <rect x="340" y="0" width="130" height="28" rx="14" fill="#2d333b"/>
+    <circle cx="358" cy="14" r="5" fill="#c69026"/>
+    <text x="370" y="19" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" fill="#adbac7">7-day result cache</text>
+
+    <!-- Desktop app pill -->
+    <rect x="482" y="0" width="124" height="28" rx="14" fill="#2d333b"/>
+    <circle cx="500" cy="14" r="5" fill="#e5534b"/>
+    <text x="512" y="19" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" fill="#adbac7">desktop GUI + exe</text>
+  </g>
+
+  <!-- Right decorative node graph -->
+  <g clip-path="url(#rounded)" opacity="0.25">
+    <!-- Edges -->
+    <line x1="1050" y1="70"  x2="1130" y2="130" stroke="#539bf5" stroke-width="1.5"/>
+    <line x1="1050" y1="70"  x2="980"  y2="140" stroke="#539bf5" stroke-width="1.5"/>
+    <line x1="1050" y1="70"  x2="1060" y2="170" stroke="#539bf5" stroke-width="1.5"/>
+    <line x1="1130" y1="130" x2="1060" y2="170" stroke="#539bf5" stroke-width="1"/>
+    <line x1="980"  y1="140" x2="1060" y2="170" stroke="#539bf5" stroke-width="1"/>
+    <line x1="1130" y1="130" x2="1150" y2="200" stroke="#539bf5" stroke-width="1"/>
+    <line x1="980"  y1="140" x2="940"  y2="210" stroke="#539bf5" stroke-width="1"/>
+    <!-- Nodes -->
+    <circle cx="1050" cy="70"  r="10" fill="#539bf5"/>
+    <circle cx="1130" cy="130" r="7"  fill="#539bf5"/>
+    <circle cx="980"  cy="140" r="7"  fill="#539bf5"/>
+    <circle cx="1060" cy="170" r="6"  fill="#57ab5a"/>
+    <circle cx="1150" cy="200" r="5"  fill="#539bf5"/>
+    <circle cx="940"  cy="210" r="5"  fill="#539bf5"/>
+  </g>
+</svg>
