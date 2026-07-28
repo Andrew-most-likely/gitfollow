@@ -546,6 +546,9 @@ def candidate_pool(already_in_state: set, my_following: set, unfollowed_seen: se
 
 def do_follows(state: dict, my_following: set, my_followers: set):
     """Follow up to FOLLOW_LIMIT new users."""
+    if FOLLOW_LIMIT <= 0:
+        log.info("Follow pass skipped (FOLLOW_LIMIT=0)")
+        return
     already_tracked  = set(state["following"].keys())
     unfollowed_seen  = set(state.get("unfollowed_seen", {}).keys())
     pool  = candidate_pool(already_tracked, my_following, unfollowed_seen)

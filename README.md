@@ -126,7 +126,7 @@ All settings are available in the GUI Settings tab. When running headlessly, set
 4. Runs every candidate through the 8-signal quality filter (with caching)
 5. Follows up to `FOLLOW_LIMIT` qualifying users with a polite delay between each
 
-### Unfollow pass (runs after follow)
+### Unfollow pass (runs before follow)
 1. Checks every account followed through this tool
 2. Unfollows anyone who hasn't followed back after `UNFOLLOW_HOURS` hours
 3. Never unfollows mutual follows or whitelisted accounts
@@ -175,3 +175,6 @@ Clear the field and type your new token. The masking is display-only.
 
 **Does the app need to stay open while running?**
 Yes - the current version runs locally. Close the window and the run stops. Use the Stop button for a clean halt.
+
+**Does clicking Run Unfollow wait for the `UNFOLLOW_HOURS` window?**
+No. `UNFOLLOW_HOURS` protects the unattended/scheduled run (e.g. GitHub Actions) so freshly-followed accounts get a chance to follow back first. A manual click of Run Unfollow in the GUI is a deliberate action and unfollows every current non-reciprocator (except whitelisted accounts) immediately.

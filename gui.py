@@ -1356,21 +1356,34 @@ class App(tk.Tk):
                 "Accept": "application/vnd.github.v3+json",
             }
             success, failed = [], []
-            for login in selected:
-                try:
-                    r = _req.delete(
-                        f"https://api.github.com/user/following/{login}",
-                        headers=hdrs, timeout=15,
-                    )
+            for idx, login in enumerate(selected):
+                while True:
+                    try:
+                        r = _req.delete(
+                            f"https://api.github.com/user/following/{login}",
+                            headers=hdrs, timeout=15,
+                        )
+                    except Exception:
+                        failed.append(login)
+                        break
                     if r.status_code == 401:
                         self.after(0, lambda: self._set_status(
                             "401 Unauthorized — token is invalid or expired. Update GH_TOKEN in Settings."
                         ))
-                        failed.extend(selected[selected.index(login):])
-                        break
+                        failed.extend(selected[idx:])
+                        self.after(0, lambda: self._unfollow_done(success, failed))
+                        return
+                    if r.status_code == 429 or (
+                        r.status_code == 403 and "rate limit" in r.text.lower()
+                    ):
+                        wait = int(r.headers.get("Retry-After", 60))
+                        self.after(0, lambda w=wait: self._set_status(
+                            f"Rate limited — waiting {w}s before continuing..."
+                        ))
+                        time.sleep(wait)
+                        continue
                     (success if r.status_code in (204, 404) else failed).append(login)
-                except Exception:
-                    failed.append(login)
+                    break
                 time.sleep(0.5)
             self.after(0, lambda: self._unfollow_done(success, failed))
 
