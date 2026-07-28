@@ -28,7 +28,18 @@ else:
 ENV_FILE   = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "data" / "state.json"
 
-VERSION = "2.3.2"
+# ── CA bundle sanity check ────────────────────────────────────────────────────
+# Some installers (e.g. PostgreSQL) set CURL_CA_BUNDLE / REQUESTS_CA_BUNDLE /
+# SSL_CERT_FILE machine-wide, pointing at their own cert bundle. If that path
+# later goes missing, `requests` refuses every call with
+# "Could not find a suitable TLS CA certificate bundle". Drop any such
+# dangling env var so requests falls back to certifi's bundled certs.
+for _ca_var in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
+    _ca_path = os.environ.get(_ca_var)
+    if _ca_path and not Path(_ca_path).is_file():
+        os.environ.pop(_ca_var, None)
+
+VERSION = "2.3.6"
 
 # ── GitHub Dark Dimmed color tokens ───────────────────────────────────────────
 
