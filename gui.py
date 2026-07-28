@@ -781,8 +781,10 @@ class App(tk.Tk):
         )
         self._btn_unfollow.pack(side="left", padx=(0, 10))
         Tooltip(self._btn_unfollow,
-                "Scans your following list and unfollows accounts that fail "
-                "quality criteria. First run is slow; subsequent runs use the cache.")
+                "Unfollows non-reciprocators older than the configured threshold. "
+                "If Quality Unfollow is enabled in Settings, also scans existing "
+                "follows for quality and unfollows failures (first run is slow; "
+                "subsequent runs use the cache).")
 
         self._btn_stop = RoundedButton(
             btn_area, "Stop", self._stop_run,
@@ -828,10 +830,12 @@ class App(tk.Tk):
             )
             return
         if mode == "unfollow":
-            env["QUALITY_UNFOLLOW"] = "true"
-            env["FOLLOW_LIMIT"]     = "0"
+            env["FOLLOW_LIMIT"] = "0"
             env.pop("FOLLOW_ONLY", None)
             os.environ.pop("FOLLOW_ONLY", None)
+            # QUALITY_UNFOLLOW is whatever was saved in Settings (env, from .env);
+            # clear any stale process-level override left by a previous run.
+            os.environ.pop("QUALITY_UNFOLLOW", None)
         else:
             env["FOLLOW_ONLY"] = "true"
             env.pop("QUALITY_UNFOLLOW", None)
