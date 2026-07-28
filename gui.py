@@ -614,9 +614,9 @@ class App(tk.Tk):
                                  bg=C_SURFACE, fg=C_MUTED)
         self._dash_ts.pack(side="right", padx=(0, 12), anchor="center")
         RoundedButton(hdr_right, "Refresh", self._refresh_dashboard,
-                      width=90, height=30, font=F_SM).pack(side="right", padx=(0, 8))
+                      width=90, height=30, font=F_SM).pack(side="right", padx=(0, 10))
         RoundedButton(hdr_right, "Clear Cache", self._clear_cache,
-                      width=100, height=30, font=F_SM, bg=C_WARNING).pack(side="right")
+                      width=100, height=30, font=F_SM, bg=C_WARNING).pack(side="right", padx=(0, 10))
 
         content = tk.Frame(page, bg=C_BG)
         content.pack(fill="both", expand=True, padx=20, pady=20)
@@ -1477,96 +1477,154 @@ class App(tk.Tk):
         form = tk.Frame(card, bg=C_SURFACE)
         form.pack(fill="x", padx=24, pady=16)
 
-        # Fields: (env_key, label, secret, default, tip)  or  (None, "SECTION", ...)
+        # Fields: (env_key, label, secret, default, tip, mode)  or  (None, "SECTION", ...)
+        # mode: "wide" (full-width entry), "narrow" (compact, paired 2-per-row),
+        # or "multiline" (wrapping text box for values that can grow long).
         FIELDS = [
-            (None, "AUTHENTICATION", None, None, None),
+            (None, "AUTHENTICATION", None, None, None, None),
             ("GH_TOKEN",    "GitHub Token",    True,  "",
              "Personal Access Token with user:follow scope. "
-             "Stored locally in .env, never shared."),
+             "Stored locally in .env, never shared.", "wide"),
             ("GH_USERNAME", "GitHub Username", False, "",
-             "Your exact GitHub username (case-insensitive)."),
+             "Your exact GitHub username (case-insensitive).", "wide"),
 
-            (None, "FOLLOW BEHAVIOR", None, None, None),
+            (None, "FOLLOW BEHAVIOR", None, None, None, None),
             ("FOLLOW_LIMIT",   "Follow Limit",        False, "150",
-             "Maximum new follows per run. Keep at or below 150/day."),
+             "Maximum new follows per run. Keep at or below 150/day.", "narrow"),
             ("UNFOLLOW_HOURS", "Unfollow After (hrs)", False, "24",
-             "Hours before unfollowing a non-reciprocator."),
+             "Hours before unfollowing a non-reciprocator.", "narrow"),
             ("WHITELIST",      "Whitelist",            False, "",
-             "Comma-separated usernames to never unfollow."),
+             "Comma-separated usernames to never unfollow.", "multiline"),
 
-            (None, "QUALITY FILTERS", None, None, None),
+            (None, "QUALITY FILTERS", None, None, None, None),
             ("ACTIVITY_DAYS",        "Activity Days",    False, "30",
-             "Skip users who haven't pushed a commit in this many days."),
+             "Skip users who haven't pushed a commit in this many days.", "narrow"),
             ("MIN_FOLLOWERS",        "Min Followers",    False, "1",
-             "Only follow users with at least this many followers."),
+             "Only follow users with at least this many followers.", "narrow"),
             ("SEARCH_MIN_FOLLOWERS", "Search Min Followers", False, "10",
              "Pre-filter the user search query: only fetch candidates with at least this many followers. "
-             "Reduces wasted API calls on ghost accounts. Sweet spot: 10–50."),
+             "Reduces wasted API calls on ghost accounts. Sweet spot: 10–50.", "narrow"),
             ("SEARCH_MAX_FOLLOWERS", "Search Max Followers", False, "1000",
              "Pre-filter the user search query: skip candidates above this follower count. "
-             "High-follower accounts rarely follow back. Sweet spot: 500–2000."),
+             "High-follower accounts rarely follow back. Sweet spot: 500–2000.", "narrow"),
             ("MAX_REPOS",            "Max Repos",        False, "500",
-             "Skip accounts with more public repos than this. Catches mass-forking bots."),
+             "Skip accounts with more public repos than this. Catches mass-forking bots.", "narrow"),
             ("MAX_FF_RATIO",         "Max F/F Ratio",    False, "10.0",
              "Skip accounts whose following/followers ratio exceeds this. "
-             "Filters follow-farmers."),
+             "Filters follow-farmers.", "narrow"),
             ("MIN_ACCOUNT_AGE_DAYS", "Min Account Age",  False, "30",
-             "Skip accounts newer than this many days. Filters throwaway accounts."),
+             "Skip accounts newer than this many days. Filters throwaway accounts.", "narrow"),
             ("CACHE_DAYS",           "Cache Days",       False, "7",
-             "Days to cache quality check results to save API quota."),
+             "Days to cache quality check results to save API quota.", "narrow"),
         ]
 
         self._settings_vars = {}
-        row_idx = 0
-        first_section = True
+        self._settings_widgets = {}
+        row_idx = [0]           # boxed so nested helpers can mutate it
+        first_section = [True]
+        pending_narrow = [None]
 
-        for item in FIELDS:
-            key, label, secret, default, tooltip = item
-
-            if key is None:
-                # Section separator + heading
-                if not first_section:
-                    tk.Frame(form, bg=C_SEP, height=1).grid(
-                        row=row_idx, column=0, columnspan=2,
-                        sticky="ew", pady=(10, 6)
-                    )
-                    row_idx += 1
-                first_section = False
-                tk.Label(form, text=label, font=("Segoe UI", 8, "bold"),
-                         bg=C_SURFACE, fg=C_MUTED).grid(
-                    row=row_idx, column=0, columnspan=2,
-                    sticky="w", pady=(0, 4)
-                )
-                row_idx += 1
-                continue
-
-            lbl_f = tk.Frame(form, bg=C_SURFACE)
-            lbl_f.grid(row=row_idx, column=0, padx=(0, 16), pady=4, sticky="w")
-            tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
-                     fg=C_TEXT, width=20, anchor="w").pack(side="left")
-            _tip(lbl_f, tooltip, bg=C_SURFACE).pack(side="left", padx=(4, 0))
-
+        def _make_entry(parent, key, secret, default, width):
             var = tk.StringVar(value=default)
             self._settings_vars[key] = var
-            entry = tk.Entry(
-                form, textvariable=var, show="*" if secret else "",
-                font=F_UI, width=36,
+            return tk.Entry(
+                parent, textvariable=var, show="*" if secret else "",
+                font=F_UI, width=width,
                 bg=C_BG, fg=C_TEXT, relief="flat",
                 highlightthickness=1,
                 highlightbackground=C_SEP,
                 highlightcolor=C_ACCENT,
                 insertbackground=C_TEXT,
             )
-            entry.grid(row=row_idx, column=1, pady=4, sticky="ew")
-            row_idx += 1
+
+        def _place_narrow(item, slot):
+            key, label, secret, default, tooltip = item
+            lbl_col, entry_col = (0, 1) if slot == 0 else (2, 3)
+            lbl_padx = (0, 10) if slot == 0 else (28, 10)
+            lbl_f = tk.Frame(form, bg=C_SURFACE)
+            lbl_f.grid(row=row_idx[0], column=lbl_col, padx=lbl_padx, pady=6, sticky="w")
+            tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
+                     fg=C_TEXT, anchor="w").pack(side="left")
+            _tip(lbl_f, tooltip, bg=C_SURFACE).pack(side="left", padx=(4, 0))
+            _make_entry(form, key, secret, default, width=10).grid(
+                row=row_idx[0], column=entry_col, pady=6, sticky="w")
+
+        def _flush_pending():
+            if pending_narrow[0] is not None:
+                _place_narrow(pending_narrow[0], 0)
+                pending_narrow[0] = None
+                row_idx[0] += 1
+
+        def _tab_to_next_widget(e):
+            e.widget.tk_focusNext().focus()
+            return "break"   # Text's default Tab behavior inserts a tab char
+
+        for item in FIELDS:
+            key, label, secret, default, tooltip, mode = item
+
+            if key is None:
+                _flush_pending()
+                # Section separator + heading
+                if not first_section[0]:
+                    tk.Frame(form, bg=C_SEP, height=1).grid(
+                        row=row_idx[0], column=0, columnspan=4,
+                        sticky="ew", pady=(12, 6)
+                    )
+                    row_idx[0] += 1
+                first_section[0] = False
+                tk.Label(form, text=label, font=("Segoe UI", 8, "bold"),
+                         bg=C_SURFACE, fg=C_MUTED).grid(
+                    row=row_idx[0], column=0, columnspan=4,
+                    sticky="w", pady=(0, 4)
+                )
+                row_idx[0] += 1
+                continue
+
+            if mode == "narrow":
+                if pending_narrow[0] is None:
+                    pending_narrow[0] = (key, label, secret, default, tooltip)
+                else:
+                    _place_narrow(pending_narrow[0], 0)
+                    _place_narrow((key, label, secret, default, tooltip), 1)
+                    pending_narrow[0] = None
+                    row_idx[0] += 1
+                continue
+
+            _flush_pending()
+
+            lbl_f = tk.Frame(form, bg=C_SURFACE)
+            lbl_f.grid(row=row_idx[0], column=0, padx=(0, 16), pady=6,
+                       sticky="nw" if mode == "multiline" else "w")
+            tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
+                     fg=C_TEXT, width=20, anchor="w").pack(side="left")
+            _tip(lbl_f, tooltip, bg=C_SURFACE).pack(side="left", padx=(4, 0))
+
+            if mode == "multiline":
+                txt = tk.Text(
+                    form, font=F_UI, height=3, wrap="word",
+                    bg=C_BG, fg=C_TEXT, relief="flat",
+                    highlightthickness=1, highlightbackground=C_SEP,
+                    highlightcolor=C_ACCENT, insertbackground=C_TEXT,
+                    padx=6, pady=4,
+                )
+                txt.insert("1.0", default)
+                txt.bind("<Tab>", _tab_to_next_widget)
+                self._settings_widgets[key] = txt
+                txt.grid(row=row_idx[0], column=1, columnspan=3, pady=6, sticky="ew")
+            else:
+                _make_entry(form, key, secret, default, width=36).grid(
+                    row=row_idx[0], column=1, columnspan=3, pady=6, sticky="ew")
+            row_idx[0] += 1
+
+        _flush_pending()
 
         # Quality unfollow toggle
         tk.Frame(form, bg=C_SEP, height=1).grid(
-            row=row_idx, column=0, columnspan=2, sticky="ew", pady=(10, 6)
+            row=row_idx[0], column=0, columnspan=4, sticky="ew", pady=(12, 6)
         )
-        row_idx += 1
+        row_idx[0] += 1
         qu_f = tk.Frame(form, bg=C_SURFACE)
-        qu_f.grid(row=row_idx, column=0, padx=(0, 16), pady=4, sticky="w")
+        qu_f.grid(row=row_idx[0], column=0, padx=(0, 16), pady=6, sticky="w")
         tk.Label(qu_f, text="Quality Unfollow", font=F_UI, bg=C_SURFACE,
                  fg=C_TEXT, width=20, anchor="w").pack(side="left")
         _tip(qu_f,
@@ -1578,8 +1636,9 @@ class App(tk.Tk):
                        bg=C_SURFACE, activebackground=C_SURFACE,
                        fg=C_TEXT, activeforeground=C_TEXT,
                        selectcolor=C_BG,
-                       relief="flat").grid(row=row_idx, column=1, pady=4, sticky="w")
+                       relief="flat").grid(row=row_idx[0], column=1, pady=6, sticky="w")
         form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
 
         # Save / load
         tk.Frame(card, bg=C_SEP, height=1).pack(fill="x", padx=24)
@@ -1601,6 +1660,10 @@ class App(tk.Tk):
                          "SEARCH_MIN_FOLLOWERS", "SEARCH_MAX_FOLLOWERS"}
         _FLOAT_FIELDS = {"MAX_FF_RATIO"}
         env = {k: v.get() for k, v in self._settings_vars.items()}
+        for k, w in self._settings_widgets.items():
+            # Collapse any stray newline (e.g. accidental Enter) - it's a
+            # comma-separated list, not meant to be multi-line data.
+            env[k] = w.get("1.0", "end-1c").replace("\n", " ").strip()
         for k in _INT_FIELDS:
             val = env.get(k, "").strip()
             if val:
@@ -1629,6 +1692,10 @@ class App(tk.Tk):
         env = load_env()
         for k, var in self._settings_vars.items():
             var.set(env.get(k, var.get()))
+        for k, w in self._settings_widgets.items():
+            current = w.get("1.0", "end-1c")
+            w.delete("1.0", "end")
+            w.insert("1.0", env.get(k, current))
         self._qu_var.set(env.get("QUALITY_UNFOLLOW", "false").lower() == "true")
         self._settings_msg.config(text=f"Loaded from {ENV_FILE}", fg=C_MUTED)
 
