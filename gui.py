@@ -431,8 +431,9 @@ class App(tk.Tk):
         return right
 
     def _card(self, parent, **pack_kw) -> tk.Frame:
-        """White surface card with no border."""
-        card = tk.Frame(parent, bg=C_SURFACE)
+        """Surface card with a hairline border for definition against the page bg."""
+        card = tk.Frame(parent, bg=C_SURFACE,
+                        highlightthickness=1, highlightbackground=C_SEP)
         card.pack(**pack_kw)
         return card
 
@@ -480,7 +481,7 @@ class App(tk.Tk):
                       width=100, height=32).pack(side="left", padx=(0, 8))
         self._test_conn_btn = RoundedButton(
             btn_row, "Test Connection", self._test_connection,
-            width=130, height=32, bg=C_ACCENT,
+            width=130, height=32, bg=C_TEXT2,
         )
         self._test_conn_btn.pack(side="left", padx=(0, 8))
         Tooltip(self._test_conn_btn,
@@ -631,17 +632,33 @@ class App(tk.Tk):
             ("unfollowed", "TOTAL UNFOLLOWED", "Total accounts unfollowed through GitFollow across all runs."),
             ("cached",     "CACHED CHECKS",    "Quality check results stored locally to avoid re-checking."),
         ]
+        tk.Label(grid, text="CURRENT", font=("Segoe UI", 8, "bold"),
+                 bg=C_BG, fg=C_MUTED).grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        tk.Label(grid, text="ALL-TIME", font=("Segoe UI", 8, "bold"),
+                 bg=C_BG, fg=C_MUTED).grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(16, 6))
+
         self._stat_vars = {}
         for i, (key, label, tooltip) in enumerate(card_defs):
             col = i % 3
-            row = i // 3
-            card = tk.Frame(grid, bg=C_SURFACE, padx=20, pady=16)
+            row = 1 if i < 3 else 3
+            card = tk.Frame(grid, bg=C_SURFACE,
+                             highlightthickness=1, highlightbackground=C_SEP)
             card.grid(row=row, column=col,
                       padx=(0 if col == 0 else 10, 0),
-                      pady=(0 if row == 0 else 10, 0),
                       sticky="nsew")
 
-            top_row = tk.Frame(card, bg=C_SURFACE)
+            # Mutual follows gets a status accent (reciprocated = good) —
+            # the other five are plain counters, not a categorical set, so
+            # they stay neutral rather than each getting an arbitrary hue.
+            if key == "mutual":
+                tk.Frame(card, bg=C_SUCCESS, width=3).pack(side="left", fill="y")
+
+            inner = tk.Frame(card, bg=C_SURFACE, padx=20, pady=16)
+            inner.pack(side="left", fill="both", expand=True)
+
+            top_row = tk.Frame(inner, bg=C_SURFACE)
             top_row.pack(fill="x")
             tk.Label(top_row, text=label, font=("Segoe UI", 8),
                      bg=C_SURFACE, fg=C_MUTED).pack(side="left")
@@ -649,7 +666,7 @@ class App(tk.Tk):
 
             var = tk.StringVar(value="--")
             self._stat_vars[key] = var
-            tk.Label(card, textvariable=var, font=F_NUM,
+            tk.Label(inner, textvariable=var, font=F_NUM,
                      bg=C_SURFACE, fg=C_TEXT).pack(anchor="w", pady=(8, 0))
 
         for col in range(3):
