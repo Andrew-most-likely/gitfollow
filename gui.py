@@ -781,10 +781,10 @@ class App(tk.Tk):
         )
         self._btn_unfollow.pack(side="left", padx=(0, 10))
         Tooltip(self._btn_unfollow,
-                "Unfollows non-reciprocators older than the configured threshold. "
-                "If Quality Unfollow is enabled in Settings, also scans existing "
-                "follows for quality and unfollows failures (first run is slow; "
-                "subsequent runs use the cache).")
+                "Immediately unfollows every current non-reciprocator (except "
+                "whitelisted accounts). If Quality Unfollow is enabled in Settings, "
+                "also scans existing follows for quality and unfollows failures "
+                "(first run is slow; subsequent runs use the cache).")
 
         self._btn_stop = RoundedButton(
             btn_area, "Stop", self._stop_run,
@@ -836,6 +836,11 @@ class App(tk.Tk):
             # QUALITY_UNFOLLOW is whatever was saved in Settings (env, from .env);
             # clear any stale process-level override left by a previous run.
             os.environ.pop("QUALITY_UNFOLLOW", None)
+            # A manual button click is a deliberate, immediate action — the
+            # UNFOLLOW_HOURS grace period exists for the unattended/scheduled
+            # run so freshly-followed accounts get a chance to follow back
+            # before then. Clicking Run Unfollow by hand should act now.
+            env["UNFOLLOW_HOURS"] = "0"
         else:
             env["FOLLOW_ONLY"] = "true"
             env.pop("QUALITY_UNFOLLOW", None)
