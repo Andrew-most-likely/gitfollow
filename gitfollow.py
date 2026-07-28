@@ -174,8 +174,9 @@ def api_get(url: str, params: dict = None) -> requests.Response:
     while True:
         try:
             resp = requests.get(url, headers=HEADERS, params=params, timeout=30)
-        except requests.Timeout:
-            log.warning("Timeout on GET %s — skipping", url)
+        except requests.exceptions.RequestException as e:
+            # Covers timeouts, dropped connections, DNS failures, SSL errors, etc.
+            log.warning("Network error on GET %s (%s) — skipping", url, e)
             # Return a fake response object with a non-retryable status so callers
             # handle it gracefully rather than crashing the entire run.
             return _timeout_response()
@@ -198,8 +199,8 @@ def api_write(method: str, url: str) -> int:
     while True:
         try:
             resp = requests.request(method, url, headers=HEADERS, timeout=30)
-        except requests.Timeout:
-            log.warning("Timeout on %s %s — skipping", method, url)
+        except requests.exceptions.RequestException as e:
+            log.warning("Network error on %s %s (%s) — skipping", method, url, e)
             return 0
         if resp.status_code == 401:
             log.error("AUTH ERROR 401 on %s %s — token is invalid, expired, or revoked", method, url)
@@ -220,7 +221,8 @@ def api_write(method: str, url: str) -> int:
 
 
 class _timeout_response:
-    """Minimal stand-in returned when a request times out, so callers don't crash."""
+    """Minimal stand-in returned when a request fails outright (timeout, dropped
+    connection, DNS failure, etc.), so callers don't crash."""
     status_code = 0
     text        = ""
     headers     = {}
@@ -684,6 +686,9 @@ def main():
 
     # Verify the token identity
     resp = api_get("https://api.github.com/user")
+    if resp.status_code == 0:
+        log.error("Could not reach the GitHub API — check your internet connection")
+        return
     if resp.status_code == 401:
         log.error("Token rejected with 401 Unauthorized — verify GH_TOKEN is valid and not expired/revoked")
         return

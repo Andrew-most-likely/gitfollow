@@ -478,6 +478,14 @@ class App(tk.Tk):
         btn_row.pack(fill="x", padx=20, pady=14)
         RoundedButton(btn_row, "Re-check", self._run_checks,
                       width=100, height=32).pack(side="left", padx=(0, 8))
+        self._test_conn_btn = RoundedButton(
+            btn_row, "Test Connection", self._test_connection,
+            width=130, height=32, bg=C_ACCENT,
+        )
+        self._test_conn_btn.pack(side="left", padx=(0, 8))
+        Tooltip(self._test_conn_btn,
+                "Makes a live call to the GitHub API to confirm GH_TOKEN is valid "
+                "and GH_USERNAME matches the token's account.")
         RoundedButton(btn_row, "Auto-fix", self._autofix,
                       width=100, height=32, bg=C_SUCCESS).pack(side="left", padx=(0, 8))
         RoundedButton(btn_row, "Create Token",
@@ -487,7 +495,8 @@ class App(tk.Tk):
                       ),
                       width=120, height=32, bg=C_TEXT2).pack(side="left")
 
-        self._setup_msg = tk.Label(card, text="", font=F_SM, bg=C_SURFACE)
+        self._setup_msg = tk.Label(card, text="", font=F_SM, bg=C_SURFACE,
+                                    wraplength=850, justify="left")
         self._setup_msg.pack(anchor="w", padx=20, pady=(0, 14))
 
     def _run_checks(self):
@@ -514,6 +523,53 @@ class App(tk.Tk):
             fg=C_SUCCESS if all_ok else C_DANGER,
         )
         self._set_status("Checks complete." if all_ok else "Some checks failed.")
+
+    def _test_connection(self):
+        env   = {**load_env(), **os.environ}
+        token = env.get("GH_TOKEN", "").strip()
+        user  = env.get("GH_USERNAME", "").strip()
+        if not token or not user:
+            messagebox.showerror(
+                "Missing credentials",
+                "Set GH_TOKEN and GH_USERNAME in the Settings tab first.",
+            )
+            return
+        self._test_conn_btn.config_state(disabled=True)
+        self._setup_msg.config(text="Testing connection to GitHub...", fg=C_MUTED)
+        self._set_status("Testing GitHub connection...")
+
+        def _fetch():
+            try:
+                import requests
+                resp = requests.get(
+                    "https://api.github.com/user",
+                    headers={"Authorization": f"token {token}",
+                             "Accept": "application/vnd.github.v3+json"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    login = resp.json().get("login", "")
+                    if login.lower() == user.lower():
+                        msg, ok = f"Connected as {login} — token is valid and ready to use.", True
+                    else:
+                        msg, ok = (
+                            f"Token is valid but belongs to '{login}', not '{user}'. "
+                            "Update GH_USERNAME in Settings.", False,
+                        )
+                elif resp.status_code == 401:
+                    msg, ok = "401 Unauthorized — GH_TOKEN is invalid, expired, or revoked.", False
+                else:
+                    msg, ok = f"GitHub API returned HTTP {resp.status_code}.", False
+            except Exception as e:
+                msg, ok = f"Connection failed: {e}", False
+            self.after(0, lambda: self._test_connection_done(msg, ok))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _test_connection_done(self, msg: str, ok: bool):
+        self._test_conn_btn.config_state(disabled=False)
+        self._setup_msg.config(text=msg, fg=C_SUCCESS if ok else C_DANGER)
+        self._set_status("Connection test complete.")
 
     def _autofix(self):
         import subprocess as sp
