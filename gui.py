@@ -1477,6 +1477,12 @@ class App(tk.Tk):
         form = tk.Frame(card, bg=C_SURFACE)
         form.pack(fill="x", padx=24, pady=16)
 
+        # Fixed pixel width for every label+tooltip block, so the "?" always
+        # sits a consistent, small distance from its word (sized to the text,
+        # not padded to it) while every entry box still starts at the same
+        # x position regardless of how long that row's label is.
+        LABEL_W = 175
+
         # Fields: (env_key, label, secret, default, tip, mode)  or  (None, "SECTION", ...)
         # mode: "wide" (full-width entry), "narrow" (compact, paired 2-per-row),
         # or "multiline" (wrapping text box for values that can grow long).
@@ -1541,7 +1547,8 @@ class App(tk.Tk):
             key, label, secret, default, tooltip = item
             lbl_col, entry_col = (0, 1) if slot == 0 else (2, 3)
             lbl_padx = (0, 10) if slot == 0 else (28, 10)
-            lbl_f = tk.Frame(form, bg=C_SURFACE)
+            lbl_f = tk.Frame(form, bg=C_SURFACE, width=LABEL_W, height=24)
+            lbl_f.pack_propagate(False)
             lbl_f.grid(row=row_idx[0], column=lbl_col, padx=lbl_padx, pady=6, sticky="w")
             tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
                      fg=C_TEXT, anchor="w").pack(side="left")
@@ -1592,11 +1599,12 @@ class App(tk.Tk):
 
             _flush_pending()
 
-            lbl_f = tk.Frame(form, bg=C_SURFACE)
+            lbl_f = tk.Frame(form, bg=C_SURFACE, width=LABEL_W, height=24)
+            lbl_f.pack_propagate(False)
             lbl_f.grid(row=row_idx[0], column=0, padx=(0, 16), pady=6,
                        sticky="nw" if mode == "multiline" else "w")
             tk.Label(lbl_f, text=label, font=F_UI, bg=C_SURFACE,
-                     fg=C_TEXT, width=20, anchor="w").pack(side="left")
+                     fg=C_TEXT, anchor="w").pack(side="left")
             _tip(lbl_f, tooltip, bg=C_SURFACE).pack(side="left", padx=(4, 0))
 
             if mode == "multiline":
@@ -1623,10 +1631,11 @@ class App(tk.Tk):
             row=row_idx[0], column=0, columnspan=4, sticky="ew", pady=(12, 6)
         )
         row_idx[0] += 1
-        qu_f = tk.Frame(form, bg=C_SURFACE)
+        qu_f = tk.Frame(form, bg=C_SURFACE, width=LABEL_W, height=24)
+        qu_f.pack_propagate(False)
         qu_f.grid(row=row_idx[0], column=0, padx=(0, 16), pady=6, sticky="w")
         tk.Label(qu_f, text="Quality Unfollow", font=F_UI, bg=C_SURFACE,
-                 fg=C_TEXT, width=20, anchor="w").pack(side="left")
+                 fg=C_TEXT, anchor="w").pack(side="left")
         _tip(qu_f,
              "When enabled, Run Unfollow also cleans up existing follows that fail "
              "quality criteria. First run is slow; subsequent runs use the cache.",
